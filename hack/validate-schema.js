@@ -151,6 +151,56 @@ for (const file of versionFilePaths) {
   }
 }
 
+// What the schema cannot see, per model: it has a version to publish, each
+// version file declares the model's name (metadata.yaml's) and is named
+// <name>-<version>.yaml, at most one variant is the default, and an LWS group
+// is as many pods as its variant requires nodes -- a group that disagrees
+// hangs at rendezvous instead of failing. The directory need not be the name:
+// published paths cannot move, and two models (gemma-4-26b-a4b,
+// gemma-4-31b-it) were published under other names.
+for (const name of modelNames()) {
+  const dir = path.join(modelsDir, name)
+  const files = versionFiles(name)
+  if (files.length === 0) {
+    failed = true
+    report(path.relative(root, dir), ["no version files: publish one, or remove the directory"])
+    continue
+  }
+  let model
+  try {
+    model = YAML.parse(fs.readFileSync(path.join(dir, "metadata.yaml"), "utf8"))?.name
+  } catch {
+    // reported by the schema check above
+  }
+  for (const rel of files) {
+    let doc
+    try {
+      doc = YAML.parse(fs.readFileSync(path.join(root, rel), "utf8"))
+    } catch {
+      continue // reported by the schema check above
+    }
+    const lines = []
+    if (model && doc?.name !== model) {
+      lines.push(`name: ${JSON.stringify(doc?.name)} is not its model's, ${JSON.stringify(model)} in metadata.yaml`)
+    }
+    const want = `${doc?.name}-${doc?.version}.yaml`
+    if (path.basename(rel) !== want) lines.push(`must be named ${want}, after the name and version it declares`)
+    const variants = Array.isArray(doc?.variants) ? doc.variants : []
+    const defaults = variants.filter((v) => v?.default === true).map((v) => v.id)
+    if (defaults.length > 1) lines.push(`variants: ${defaults.join(", ")} are all marked default; at most one may be`)
+    for (const v of variants) {
+      const lws = v?.values?.lws
+      if (lws?.enabled === true && lws.size !== v?.requires?.nodes) {
+        lines.push(`variants: ${v.id}: values.lws.size ${lws.size} is not requires.nodes ${v?.requires?.nodes}`)
+      }
+    }
+    if (lines.length > 0) {
+      failed = true
+      report(rel, lines)
+    }
+  }
+}
+
 // What the schema cannot see: a tuning pair must name a published version of
 // its model, two different variants of that version, and a report that exists;
 // and a variant named as tuned must have its result recorded. swiss does not
@@ -232,11 +282,13 @@ for (const meta of metadataFiles) {
 
 // The site links every HTML file beside a model's metadata and skips one it
 // cannot show. Here that is an error, so a broken report gets fixed rather
-// than quietly going missing from the site.
+// than quietly going missing from the site. index.html is taken: the site
+// and the catalog share one GitHub Pages tree, and that is the model's page.
 for (const name of modelNames()) {
   const dir = path.join(modelsDir, name)
   for (const file of fs.readdirSync(dir).filter((f) => f.endsWith(".html")).sort()) {
-    const problem = reportProblem(path.join(dir, file))
+    const problem =
+      file === "index.html" ? "index.html is the model's page on the site; name the report something else" : reportProblem(path.join(dir, file))
     if (problem) {
       failed = true
       report(path.relative(root, path.join(dir, file)), [problem])

@@ -2,7 +2,8 @@
 // Check every image the catalog names can be pulled anonymously, by tag and by
 // any digest it pins, and that each tuned pair's perf report measured the
 // builds its two variants run. Each image is logged as ok, warning (its tag
-// has moved off a pinned digest that is still pullable) or error.
+// has moved off a pinned digest that is still pullable) or error. Registries
+// are asked through crane, which npm run tools:install pins.
 //
 //   npm run validate:images                           # the whole catalog
 //   npm run validate:images -- models/x/x-1.0.0.yaml  # only these files
@@ -11,28 +12,20 @@
 "use strict";
 
 const fs = require("node:fs");
-const http = require("node:http");
 const path = require("node:path");
+const { parseArgs } = require("node:util");
 const YAML = require("yaml");
 const { root, modelNames, versionFiles } = require("./lib/catalog");
 const { checkImage, reportMismatches, changedVersionFiles } = require("./lib/images");
 
-// Reach registries through HTTP(S)_PROXY / NO_PROXY when they are set, as
-// --use-env-proxy would, without the caller having to pass it.
-http.setGlobalProxyFromEnv();
-
 function parse(args) {
-  const files = [];
-  let base = null;
-  let matchDigest = false;
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--base") {
-      if (!args[i + 1] || args[i + 1].startsWith("--")) throw new Error("--base: missing argument");
-      base = args[++i];
-    } else if (args[i] === "--match-digest") matchDigest = true;
-    else if (args[i].startsWith("-")) throw new Error(`unknown option ${args[i]}`);
-    else files.push(path.relative(root, path.resolve(args[i])).split(path.sep).join("/"));
-  }
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: { base: { type: "string" }, "match-digest": { type: "boolean", default: false } },
+  });
+  const { base, "match-digest": matchDigest } = values;
+  const files = positionals.map((file) => path.relative(root, path.resolve(file)).split(path.sep).join("/"));
   if (base && files.length) throw new Error("choose --base REF or explicit files, not both");
   if (base) return { files: changedVersionFiles(root, base), matchDigest };
   const versions = modelNames().flatMap((name) => versionFiles(name));
@@ -62,7 +55,6 @@ async function main() {
     }
   }
 
-  const tokens = new Map();
   const results = new Map();
   const keys = [...uses.keys()];
   // A few at a time: enough to be quick, few enough not to trip rate limits.
@@ -70,7 +62,7 @@ async function main() {
     const batch = keys.slice(i, i + 4);
     await Promise.all(batch.map(async (key) => {
       const [repository, tag, digest] = JSON.parse(key);
-      results.set(key, await checkImage({ repository, tag, digest }, { tokens, matchDigest }));
+      results.set(key, await checkImage({ repository, tag, digest }, { matchDigest }));
     }));
     for (const key of batch) console.log(`${results.get(key).level.padEnd(7)} ${results.get(key).message}`);
   }

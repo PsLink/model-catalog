@@ -1,0 +1,307 @@
+// Pieces every page shows a model or variant with.
+import { Fragment, type ReactElement, type ReactNode } from "react";
+import { Link } from "react-router";
+import type { Model, Variant } from "@/types";
+import { anchorOf, encodePath, modelPath, reportLinks, REPORT_LANG, UPLIFT_HELP, variantBest } from "@/lib/catalog";
+import { computeSummary, type Facet } from "@/lib/facets";
+import { gpuGroup, gpuHue, tagHue } from "@/lib/hues";
+import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { icons } from "./icons";
+
+export const none = <span className="text-faint">—</span>;
+
+// Links open in a new tab, so the catalog stays where it was.
+export const NEW_TAB = { target: "_blank", rel: "noopener" } as const;
+
+// The site's root, where the published files are: catalog.json, index.json,
+// the version files and the perf reports.
+export const ROOT = import.meta.env.BASE_URL;
+
+// A filter chip: clicking one sets the list's filter (see ListPage). Family
+// chips stay neutral, so a family never reads as a tag; GPU names wear the
+// same highlight as in hardware lines.
+export function Chip({ filter, value }: { filter: "tag" | "family" | "hardware"; value: string }) {
+  const hue = filter === "tag" ? `hue-${tagHue(value)}` : filter === "hardware" ? `hue-${gpuHue(value)} font-semibold` : "";
+  return (
+    <Badge variant="chip" className={hue} asChild>
+      <button type="button" data-filter={filter} data-value={value} title={`Filter by ${filter}: ${value}`}>
+        {value}
+      </button>
+    </Badge>
+  );
+}
+
+export function DeprecatedBadge({ m, className }: { m: Model; className?: string }) {
+  if (!m.deprecated) return null;
+  return (
+    <Badge variant="deprecated" className={className} title={m.deprecatedReason ?? undefined}>
+      deprecated
+    </Badge>
+  );
+}
+
+export function VariantBadges({ v }: { v: Variant }) {
+  return (
+    <>
+      {v.default && <Badge variant="quiet">default</Badge>}
+      {v.isOptimized && <Badge variant="optimized">optimized</Badge>}
+      {v.isBaseline && <Badge variant="quiet">baseline</Badge>}
+    </>
+  );
+}
+
+// id and badges on one line. The id opens the variant on its model page,
+// where its configuration and its source on GitHub are.
+export function VariantLine({ m, v, className, idClass }: { m: Model; v: Variant; className: string; idClass?: string }) {
+  return (
+    <div className={className}>
+      <Link
+        className={cn("mr-[0.15rem] font-mono text-[0.84rem] wrap-anywhere text-inherit hover:text-primary", idClass)}
+        to={{ pathname: modelPath(m), hash: anchorOf(m.latest, v.id) }}
+        title={v.description ? `${v.id}: ${v.description}` : v.id}
+      >
+        {v.id}
+      </Link>
+      <VariantBadges v={v} />
+    </div>
+  );
+}
+
+// The id as it heads a line; see VariantLine.
+export const variantLine = "flex flex-wrap items-center gap-x-[0.45rem] gap-y-[0.3rem]";
+export const tableVariantLine = "flex h-[1.45rem] items-center gap-[0.45rem] whitespace-nowrap [&+&]:mt-[0.35rem]";
+
+const highlight = (label: string) => (
+  <Badge variant="gpu" className={`hue-${gpuHue(label)}`}>
+    {label}
+  </Badge>
+);
+
+// hardwareShort with each GPU name marked: "8 × <H100>", highlighted unless
+// mark says otherwise. Labels are only GPU names when the variant names
+// products; "any GPU" stays plain.
+export function Hardware({ v, short = v.hardwareShort, mark = highlight }: { v: Variant; short?: string; mark?: (label: string) => ReactNode }) {
+  const labels = v.hardware.filter((label) => label !== "any GPU");
+  return (
+    <>
+      {short.split(/( × | \/ )/).map((part, i) => (
+        <Fragment key={i}>{labels.includes(part) ? mark(part) : part}</Fragment>
+      ))}
+    </>
+  );
+}
+
+// A bar from the left, rounded at the data end, in the improvement's green.
+export function Bar({ pct, className }: { pct: number; className?: string }) {
+  return (
+    <span className={cn("h-2 overflow-hidden rounded-r bg-muted", className)}>
+      <span className="block h-full min-w-[2px] rounded-r bg-success" style={{ width: `${pct.toFixed(1)}%` }}></span>
+    </span>
+  );
+}
+
+// An optimized variant's bar and best number, drawn against scale, the best
+// result in view; null for any other variant.
+export function improvementBar(m: Model, v: Variant, scale: number, className: string): ReactElement | null {
+  const b = variantBest(m, v.id);
+  if (!b) return null;
+  const width = Math.max(0, Math.min(100, (b.upliftPct / scale) * 100));
+  const title =
+    (b.of > 1 ? `Best of ${b.of} workloads: ` : "") +
+    `${b.upliftLabel}${b.name ? ` at ${b.name} tokens` : ""}, ${v.id} vs ${b.t.baselineId}, measured on v${b.t.version}. ` +
+    UPLIFT_HELP;
+  return (
+    <div className={cn("grid grid-cols-[72px_minmax(4.6em,auto)] items-center justify-end gap-x-[0.6rem]", className)} title={title}>
+      <Bar pct={width} />
+      <span className="text-right text-[0.86rem] font-bold text-foreground tabular-nums">{b.upliftLabel}</span>
+    </div>
+  );
+}
+
+export interface LinkItem {
+  // The variant it belongs to: a report's tuned variant, a link's own.
+  id: string | null;
+  el: ReactElement;
+}
+
+// Perf reports, then any variants[].link, as buttons or as inline links.
+export function linkItems(m: Model, kind: "button" | "link", reportLabel: string): LinkItem[] {
+  const variant = kind === "button" ? "outline" : "link";
+  const size = kind === "button" ? "default" : "none";
+  const items: LinkItem[] = reportLinks(m, reportLabel).map(({ r, id, title, text }) => ({
+    id,
+    el: (
+      <Button key={r.path} variant={variant} size={size} asChild>
+        <a href={ROOT + encodePath(r.path) + REPORT_LANG} title={title} {...NEW_TAB}>
+          {icons.report}
+          {text}
+        </a>
+      </Button>
+    ),
+  }));
+  for (const v of m.versions[0].variants) {
+    if (!v.link) continue;
+    items.push({
+      id: v.id,
+      el: (
+        <Button key={`link:${v.id}`} variant={variant} size={size} asChild>
+          <a href={v.link} {...NEW_TAB}>
+            {icons.external}
+            {v.id}
+          </a>
+        </Button>
+      ),
+    });
+  }
+  return items;
+}
+
+// The hardware filter: one toggle per GPU, grouped by gpuGroup, most first
+// within a group. Anything on any pressed GPU matches. counts is per GPU;
+// what says what is counted, for the tooltip.
+export function GpuToggles({
+  counts,
+  what,
+  selected,
+  onChange,
+}: {
+  counts: Record<string, number>;
+  what: string;
+  selected: string[];
+  onChange: (labels: string[]) => void;
+}) {
+  const labels = Object.keys(counts).sort((a, b) => gpuGroup(a) - gpuGroup(b) || counts[b] - counts[a] || a.localeCompare(b));
+  return (
+    <ToggleGroup type="multiple" variant="tint" aria-label="GPU" value={selected} onValueChange={onChange}>
+      <span className="mr-[0.3rem] text-[0.8rem] font-bold tracking-[0.06em] text-foreground" aria-hidden="true">
+        GPU
+      </span>
+      {labels.map((h) => (
+        <ToggleGroupItem key={h} value={h} className={`hue-${gpuHue(h)}`} title={`${what} ${h}`}>
+          {h}
+          <span className="text-[0.74rem] font-medium tabular-nums opacity-85">{counts[h]}</span>
+        </ToggleGroupItem>
+      ))}
+    </ToggleGroup>
+  );
+}
+
+// Radix keeps "" for no value at all, so "everything" travels as this.
+const ALL = "*";
+
+// A toolbar select over a filter's values, each with how many entries have it;
+// "" is everything.
+export function FilterSelect({
+  label,
+  all,
+  values,
+  value,
+  onChange,
+  className,
+}: {
+  label: string;
+  all: string;
+  values: string[];
+  value: string;
+  onChange: (value: string) => void;
+  className?: string;
+}) {
+  const counts: Record<string, number> = {};
+  for (const v of values) counts[v] = (counts[v] || 0) + 1;
+  return (
+    <Select value={value || ALL} onValueChange={(v) => onChange(v === ALL ? "" : v)}>
+      <SelectTrigger aria-label={label} className={className}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={ALL}>{all}</SelectItem>
+        <SelectSeparator />
+        {Object.keys(counts)
+          .sort((a, b) => a.localeCompare(b))
+          .map((v) => (
+            <SelectItem key={v} value={v} hint={counts[v]}>
+              {v}
+            </SelectItem>
+          ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function Stat({ label, value, sub, pos }: { label: string; value: ReactNode; sub?: string; pos?: boolean }) {
+  return (
+    <Card className="rounded-xl px-4 py-[0.8rem] max-[560px]:snap-start max-[560px]:px-[0.85rem] max-[560px]:py-[0.7rem]">
+      <div className="text-[0.78rem] text-muted-foreground">{label}</div>
+      <div className={cn("text-[1.45rem] font-[650] tracking-[-0.01em] tabular-nums", pos && "text-success")}>{value}</div>
+      <div className="min-h-[1.2em] text-[0.78rem] wrap-anywhere text-faint">{sub || ""}</div>
+    </Card>
+  );
+}
+
+// The summary over what a list shows. On phones it scrolls sideways.
+export function Summary({ items }: { items: Facet[] }) {
+  const s = computeSummary(items);
+  const pct = (x: number) => "+" + (Math.round(x * 10) / 10).toFixed(1) + "%";
+  const counts = (o: Record<string, number>) =>
+    Object.keys(o)
+      .sort((a, b) => o[b] - o[a] || a.localeCompare(b))
+      .map((k) => `${k} ${o[k]}`)
+      .join(" · ");
+  return (
+    <section
+      aria-label="Summary"
+      aria-live="polite"
+      className="mb-4 grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3 max-[560px]:-mx-4 max-[560px]:grid-flow-col max-[560px]:auto-cols-[minmax(132px,40%)] max-[560px]:grid-cols-none max-[560px]:snap-x max-[560px]:snap-proximity max-[560px]:scroll-px-4 max-[560px]:overflow-x-auto max-[560px]:px-4 max-[560px]:pb-[2px] max-[560px]:[scrollbar-width:none] max-[560px]:[&::-webkit-scrollbar]:hidden"
+    >
+      <Stat label="Models" value={s.models} sub={s.deprecated ? `${s.deprecated} deprecated` : ""} />
+      <Stat label="Variants" value={s.variants} sub={counts(s.engines)} />
+      <Stat label="Optimized pairs" value={s.pairs} sub={s.models ? `${Math.round((s.pairs / s.models) * 100)}% of models` : ""} />
+      <Stat
+        label="Median improvement"
+        value={s.median == null ? "—" : pct(s.median)}
+        sub={s.median == null ? "" : `${pct(s.worst!.pct)} to ${pct(s.best!.pct)}`}
+        pos={s.median != null}
+      />
+      <Stat label="Best improvement" value={s.best ? pct(s.best.pct) : "—"} sub={s.best ? s.best.name : ""} pos={!!s.best} />
+    </section>
+  );
+}
+
+export function chartCode(v: Variant) {
+  return v.chart && v.chart.name ? <code>{`${v.chart.name}${v.chart.version ? ` ${v.chart.version}` : ""}`}</code> : null;
+}
+
+export function imageCode(v: Variant) {
+  return v.image && v.image.repository ? <code>{`${v.image.repository}${v.image.tag ? `:${v.image.tag}` : ""}`}</code> : null;
+}
+
+// One fact of a definition list; nothing when there is no value. The classes
+// are the list's: a model page stacks each label over its value, a variant
+// card sets them side by side.
+export function Fact({ label, children, className, dt, dd }: { label: string; children: ReactNode; className?: string; dt: string; dd: string }) {
+  if (!children) return null;
+  return (
+    <div className={className}>
+      <dt className={dt}>{label}</dt>
+      <dd className={dd}>{children}</dd>
+    </div>
+  );
+}
+
+// GPU chips, NVIDIA's first.
+export function GpuChips({ labels }: { labels: string[] }) {
+  return (
+    <>
+      {[...labels]
+        .sort((a, b) => gpuGroup(a) - gpuGroup(b) || a.localeCompare(b))
+        .map((h) => (
+          <Chip key={h} filter="hardware" value={h} />
+        ))}
+    </>
+  );
+}

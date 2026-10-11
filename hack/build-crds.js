@@ -10,6 +10,7 @@
 //   node hack/build-crds.js [--locked] [DIR]
 const fs = require("node:fs");
 const path = require("node:path");
+const {parseArgs} = require("node:util");
 const {root} = require("./lib/catalog");
 const {buildSchemas, cacheDir} = require("./lib/crd-schema");
 const config = require("../schema/crds/config.json");
@@ -32,9 +33,15 @@ function pins(list) {
 }
 
 async function main(args) {
-  const locked = args.includes("--locked");
-  const rest = args.filter((arg) => arg !== "--locked");
-  if (rest.length > 1 || rest.some((arg) => arg.startsWith("-"))) throw new Error("usage: build-crds.js [--locked] [DIR]");
+  const usage = "usage: build-crds.js [--locked] [DIR]";
+  let parsed;
+  try {
+    parsed = parseArgs({args, allowPositionals: true, options: {locked: {type: "boolean", default: false}}});
+  } catch (err) {
+    throw new Error(`${err.message}\n${usage}`);
+  }
+  const {values: {locked}, positionals: rest} = parsed;
+  if (rest.length > 1) throw new Error(usage);
   const text = fs.existsSync(lockFile) ? fs.readFileSync(lockFile, "utf8") : null;
   const lock = text && JSON.parse(text);
   const current = lock?.objectMeta?.url === objectMetaUrl && pins(lock.sources) === pins(sources);

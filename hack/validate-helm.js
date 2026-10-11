@@ -4,26 +4,22 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const {styleText, stripVTControlCharacters} = require("node:util");
+const {parseArgs, styleText, stripVTControlCharacters} = require("node:util");
 const YAML = require("yaml");
 const {root, compareVersions, isPrerelease} = require("./lib/catalog");
 const {command, selectFiles, kubeconformArgs, failureLines, parseVersions} = require("./lib/helm-validation");
 const config = require("../schema/crds/config.json");
 
 function options(args) {
-  const opts = {files: [], chartMode: "latest", output: path.join(root, "artifacts/helm-validation")};
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-    if (["--base", "--output", "--chart-mode"].includes(arg)) {
-      if (!args[i + 1] || args[i + 1].startsWith("--")) throw new Error(`${arg}: missing argument`);
-      opts[arg === "--chart-mode" ? "chartMode" : arg.slice(2)] = args[++i];
-    } else if (arg.startsWith("-")) throw new Error(`unknown option ${arg}`);
-    else opts.files.push(arg);
-  }
+  const {values, positionals} = parseArgs({args, allowPositionals: true, options: {
+    base: {type: "string"},
+    output: {type: "string", default: path.join(root, "artifacts/helm-validation")},
+    "chart-mode": {type: "string", default: "latest"},
+  }});
+  const opts = {files: positionals, base: values.base, chartMode: values["chart-mode"], output: path.resolve(root, values.output)};
   if (opts.base && opts.files.length) throw new Error("choose --base REF or explicit files, not both");
   // Nothing narrows it: every version file.
   opts.all = !opts.base && !opts.files.length;
-  opts.output = path.resolve(root, opts.output);
   if (!["latest", "declared"].includes(opts.chartMode)) throw new Error("--chart-mode must be latest or declared");
   return opts;
 }
@@ -80,7 +76,7 @@ function main(opts, {repositoryRoot = root, runCommand = command} = {}) {
     if (problems.length) log(`      ${paint("dim", `logs: ${shown(dir)}`)}`);
   };
   const bin = (name) => {
-    const installed = path.join(root, ".cache/helm-validation/bin", name);
+    const installed = path.join(root, ".cache/bin", name);
     return fs.existsSync(installed) ? installed : name;
   };
   const env = {...process.env, HELM_CONFIG_HOME: path.join(runDir, "helm/config"),
@@ -112,7 +108,7 @@ function main(opts, {repositoryRoot = root, runCommand = command} = {}) {
     for (const [name, args] of [["helm", ["version", "--short"]], ["kubeconform", ["-v"]]]) {
       const version = requireSuccess(invoke(bin(name), args, runDir, `${name}-version`), "tools").trim();
       if (!new RegExp(`^v${config[`${name}Version`].replaceAll(".", "\\.")}(?:\\+|$)`).test(version)) {
-        throw new Error(`${name}: expected ${config[`${name}Version`]}, got ${version}; run npm run helm:install`);
+        throw new Error(`${name}: expected ${config[`${name}Version`]}, got ${version}; run npm run tools:install`);
       }
     }
     // CRD schemas are not committed: build them from the lock for this run,

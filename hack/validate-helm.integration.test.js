@@ -108,7 +108,7 @@ for (const chartMode of ["latest", "declared"]) {
     ]) {
       const rendered = path.join(temp, "unknown.yaml");
       fs.writeFileSync(rendered, YAML.stringify({apiVersion, kind, metadata: {name: "unknown"}}));
-      const result = command(path.join(root, ".cache/helm-validation/bin/kubeconform"),
+      const result = command(path.join(root, ".cache/bin/kubeconform"),
         kubeconformArgs(config, path.join(temp, summary.runDirectory, "crds"), cache, rendered));
       assert.equal(result.ok, false, `${apiVersion}/${kind}`);
     }

@@ -3,7 +3,7 @@
 apiVersion: catalog.swiss/v1
 
 # Where this catalog's site is published: .github/workflows/pages.yml deploys
-# hack/build-site.js's output here, perf reports included, at
+# npm run build:site's output (site/) here, perf reports included, at
 # <site>models/<name>/<report>. A consumer builds a tuned variant's report link
 # from this and the model's tuning[].report. No variant carries the link
 # itself: a version file is immutable once published, and would have to name

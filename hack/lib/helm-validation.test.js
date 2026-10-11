@@ -16,6 +16,8 @@ function repository(t) {
   git("init", "-b", "main");
   git("config", "user.name", "Validator Test");
   git("config", "user.email", "validator@example.invalid");
+  // The fixture's commits are throwaway: never ask the developer's gpg.
+  git("config", "commit.gpgsign", "false");
   function write(file, body = "test\n") {
     fs.mkdirSync(path.dirname(path.join(dir, file)), {recursive: true});
     fs.writeFileSync(path.join(dir, file), body);

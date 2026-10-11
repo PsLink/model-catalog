@@ -3,20 +3,16 @@
 // the registry it names. A catalog is public; an image only one site can pull
 // is a variant only that site can deploy.
 
-const crypto = require("crypto");
+const { execFile } = require("child_process");
 const dns = require("dns").promises;
+const fs = require("fs");
 const net = require("net");
 const path = require("path");
+const { promisify } = require("util");
+const ipaddr = require("ipaddr.js");
 const { command } = require("./helm-validation");
-const { modelNames, versionFiles } = require("./catalog");
+const { root, modelNames, versionFiles } = require("./catalog");
 const { jsonBlocks } = require("./report");
-
-const ACCEPT = [
-  "application/vnd.oci.image.index.v1+json",
-  "application/vnd.docker.distribution.manifest.list.v2+json",
-  "application/vnd.oci.image.manifest.v1+json",
-  "application/vnd.docker.distribution.manifest.v2+json",
-].join(", ");
 
 // A repository the way containerd reads it: no registry host (or docker.io)
 // means Docker Hub, and a bare name there is an official image under library/.
@@ -30,14 +26,13 @@ function parseRepository(repository) {
   return { registry: "docker.io", host: "registry-1.docker.io", name: parts.length === 1 ? `library/${parts[0]}` : parts.join("/") };
 }
 
-// RFC 1918, loopback, link-local and unique-local: nobody outside reaches them.
+// Ranges nobody outside reaches: RFC 1918, carrier-grade NAT (where tailnets
+// live), loopback, link-local and unique-local. An IPv4-mapped IPv6 address
+// counts as the IPv4 address it maps.
+const PRIVATE_RANGES = new Set(["private", "carrierGradeNat", "loopback", "linkLocal", "uniqueLocal"]);
+
 function isPrivateAddress(ip) {
-  if (net.isIPv4(ip)) {
-    const [a, b] = ip.split(".").map(Number);
-    return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
-  }
-  const v6 = ip.toLowerCase();
-  return v6 === "::1" || /^f[cd]/.test(v6) || /^fe[89ab]/.test(v6);
+  return PRIVATE_RANGES.has(ipaddr.process(ip).range());
 }
 
 // The private address a registry host resolves to, when it resolves to
@@ -55,64 +50,55 @@ async function privateNetwork(host, lookup = dns.lookup) {
   return addresses.length && addresses.every(isPrivateAddress) ? addresses[0] : null;
 }
 
-function bearerChallenge(header) {
-  if (!/^\s*bearer\s/i.test(header || "")) return null;
-  const params = {};
-  for (const [, k, v] of header.matchAll(/(\w+)="([^"]*)"/g)) params[k.toLowerCase()] = v;
-  return params.realm ? params : null;
+// crane's error for a lookup that failed, in this check's words where one
+// fits, else crane's own.
+function craneProblem(stderr) {
+  const message = String(stderr).trim().split("\n").pop().replace(/^Error: /, "");
+  if (/\b(MANIFEST_UNKNOWN|NAME_UNKNOWN)\b/.test(message)) return "no such manifest";
+  if (/\b(UNAUTHORIZED|DENIED)\b/.test(message)) return "not pullable without a login (private, or no such repository)";
+  return message;
+}
+
+const execFileAsync = promisify(execFile);
+
+// crane uses the docker logins on this machine, and the outside world has
+// none: point it at a config of its own that holds no credentials.
+let anonymous;
+function anonymousConfig() {
+  if (!anonymous) {
+    anonymous = path.join(root, ".cache/crane-anonymous");
+    fs.mkdirSync(anonymous, { recursive: true });
+    fs.writeFileSync(path.join(anonymous, "config.json"), "{}\n");
+  }
+  return anonymous;
+}
+
+// What crane digest says of reference, as { digest } or { problem }. crane
+// sends HEAD first, which Docker Hub does not count against pulls, gets any
+// registry's anonymous token, honors HTTP(S)_PROXY, and retries what is worth
+// retrying. The pinned crane from npm run tools:install, else one on PATH.
+async function craneDigest(reference) {
+  const installed = path.join(root, ".cache/bin/crane");
+  const crane = fs.existsSync(installed) ? installed : "crane";
+  try {
+    const { stdout } = await execFileAsync(crane, ["digest", reference], {
+      env: { ...process.env, DOCKER_CONFIG: anonymousConfig() },
+      timeout: 5 * 60 * 1000,
+    });
+    return { digest: stdout.trim() };
+  } catch (err) {
+    if (err.code === "ENOENT") throw new Error("crane not found: run npm run tools:install");
+    return { problem: err.killed ? "crane timed out" : craneProblem(err.stderr || err.message) };
+  }
 }
 
 // The manifest digest ref (a tag or digest) names in repository, pulled
 // anonymously, as { digest }; or why it cannot be pulled, as { problem }.
-// HEAD first: Docker Hub does not count it against pulls.
-async function resolveManifest(repository, ref, { fetch = globalThis.fetch, lookup, tokens = new Map(), attempts = 3 } = {}) {
-  const { host, name } = parseRepository(repository);
+async function resolveManifest(repository, ref, { lookup, digestOf = craneDigest } = {}) {
+  const { host } = parseRepository(repository);
   const internal = await privateNetwork(host, lookup);
   if (internal) return { problem: `${host} is on a private network (${internal})` };
-  const url = `https://${host}/v2/${name}/manifests/${ref}`;
-  const request = async (method) => {
-    const token = tokens.get(`${host}/${name}`);
-    return fetch(url, { method, headers: { Accept: ACCEPT, ...(token ? { Authorization: `Bearer ${token}` } : {}) } });
-  };
-  let lastError;
-  for (let i = 0; i < attempts; i++) {
-    try {
-      let r = await request("HEAD");
-      if (r.status === 405) r = await request("GET");
-      if (r.status === 401 && !tokens.has(`${host}/${name}`)) {
-        const challenge = bearerChallenge(r.headers.get("www-authenticate"));
-        if (!challenge) return { problem: "the registry requires a login" };
-        const q = new URLSearchParams({ scope: `repository:${name}:pull` });
-        if (challenge.service) q.set("service", challenge.service);
-        const t = await fetch(`${challenge.realm}?${q}`);
-        const body = t.ok ? await t.json() : {};
-        if (!(body.token || body.access_token)) return { problem: "the registry gives no anonymous pull token" };
-        tokens.set(`${host}/${name}`, body.token || body.access_token);
-        r = await request("HEAD");
-        if (r.status === 405) r = await request("GET");
-      }
-      if (r.ok) {
-        // Registries name the digest in a header; for one that does not, it is
-        // the digest of the manifest's bytes.
-        let digest = r.headers.get("docker-content-digest");
-        if (!digest) {
-          const body = await request("GET");
-          if (!body.ok) throw new Error(`HTTP ${body.status}`);
-          digest = `sha256:${crypto.createHash("sha256").update(Buffer.from(await body.arrayBuffer())).digest("hex")}`;
-        }
-        return { digest };
-      }
-      if (r.status === 401 || r.status === 403) return { problem: "not pullable without a login (private, or no such repository)" };
-      if (r.status === 404) return { problem: "no such manifest" };
-      if (r.status === 429 || r.status >= 500) throw new Error(`HTTP ${r.status}`);
-      return { problem: `HTTP ${r.status}` };
-    } catch (err) {
-      lastError = err;
-      await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** i));
-    }
-  }
-  const reason = lastError && lastError.cause ? lastError.cause.code || lastError.cause.message : lastError && lastError.message;
-  return { problem: `could not reach ${host}: ${reason}` };
+  return digestOf(`${repository}${ref.startsWith("sha256:") ? "@" : ":"}${ref}`);
 }
 
 // How an image block fares pulled anonymously, as { level, message }. "error"
@@ -203,4 +189,4 @@ function changedVersionFiles(root, base) {
   return versions.filter((file) => changed.includes(file) || touched.has(file.split("/")[1]));
 }
 
-module.exports = { parseRepository, isPrivateAddress, resolveManifest, checkImage, reportImages, imageRef, reportMismatches, changedVersionFiles };
+module.exports = { parseRepository, isPrivateAddress, craneProblem, resolveManifest, checkImage, reportImages, imageRef, reportMismatches, changedVersionFiles };

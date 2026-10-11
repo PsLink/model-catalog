@@ -1,34 +1,21 @@
 "use strict";
 
 const assert = require("node:assert/strict");
-const crypto = require("node:crypto");
 const { test } = require("node:test");
-const { parseRepository, isPrivateAddress, resolveManifest, checkImage, imageRef, reportMismatches } = require("./images");
+const { parseRepository, isPrivateAddress, craneProblem, resolveManifest, checkImage, imageRef, reportMismatches } = require("./images");
 
 const publicDns = async () => [{ address: "52.45.125.121" }];
-const digestOf = (manifest) => `sha256:${crypto.createHash("sha256").update(manifest).digest("hex")}`;
-const [V1, V2] = ['{"schemaVersion":2,"build":1}', '{"schemaVersion":2,"build":2}'];
+const [D1, D2] = [`sha256:${"1".repeat(64)}`, `sha256:${"2".repeat(64)}`];
 
-// A registry that wants an anonymous token, as Docker Hub and registry do.
-// manifests maps a tag or digest to the manifest it serves.
-function registry({ manifests = {}, token = "t", failures = 0, digestHeader = true } = {}) {
+// crane digest against a registry holding manifests, which maps a reference
+// (repository:tag or repository@digest) to its digest.
+function registry(manifests = {}) {
   const calls = [];
-  const fetch = async (url, init = {}) => {
-    calls.push(url);
-    if (failures-- > 0) throw new TypeError("fetch failed", { cause: { code: "ECONNRESET" } });
-    if (url.startsWith("https://auth.example/token")) {
-      return { ok: Boolean(token), status: token ? 200 : 401, json: async () => (token ? { token } : {}) };
-    }
-    const authed = init.headers && init.headers.Authorization === `Bearer ${token}`;
-    if (!authed) {
-      return { ok: false, status: 401, headers: new Headers({ "www-authenticate": 'Bearer realm="https://auth.example/token",service="reg"' }) };
-    }
-    const manifest = manifests[url.split("/manifests/")[1]];
-    if (!manifest) return { ok: false, status: 404, headers: new Headers() };
-    const headers = new Headers(digestHeader ? { "docker-content-digest": digestOf(manifest) } : {});
-    return { ok: true, status: 200, headers, arrayBuffer: async () => new TextEncoder().encode(init.method === "HEAD" ? "" : manifest).buffer };
+  const digestOf = async (reference) => {
+    calls.push(reference);
+    return manifests[reference] ? { digest: manifests[reference] } : { problem: "no such manifest" };
   };
-  return { fetch, calls };
+  return { digestOf, calls };
 }
 
 test("repositories resolve the way containerd resolves them", () => {
@@ -40,68 +27,69 @@ test("repositories resolve the way containerd resolves them", () => {
   assert.deepEqual(parseRepository("localhost:5000/x"), { registry: "localhost:5000", host: "localhost:5000", name: "x" });
 });
 
-test("private, loopback and link-local addresses are not public", () => {
-  for (const ip of ["10.1.2.3", "172.27.133.35", "192.168.0.1", "127.0.0.1", "169.254.1.1", "::1", "fd00::1", "fe80::1"]) {
+test("private, carrier-grade NAT, loopback and link-local addresses are not public", () => {
+  for (const ip of ["10.1.2.3", "172.27.133.35", "192.168.0.1", "100.100.1.1", "127.0.0.1", "169.254.1.1", "::1", "fd00::1", "fe80::1", "::ffff:10.0.0.1"]) {
     assert.ok(isPrivateAddress(ip), ip);
   }
-  for (const ip of ["172.32.0.1", "52.45.125.121", "100.63.226.34", "2600:1f18::1"]) assert.ok(!isPrivateAddress(ip), ip);
+  for (const ip of ["172.32.0.1", "52.45.125.121", "100.63.226.34", "2600:1f18::1", "::ffff:52.45.125.121"]) assert.ok(!isPrivateAddress(ip), ip);
 });
 
-test("an image anyone can pull is ok, after an anonymous token", async () => {
-  const { fetch } = registry({ manifests: { "v1": V1 } });
-  assert.deepEqual(await checkImage({ repository: "org/app", tag: "v1" }, { fetch, lookup: publicDns }), {
+test("crane's errors read in this check's words", () => {
+  const missing = "Error: GET https://index.docker.io/v2/lmsysorg/sglang/manifests/x: MANIFEST_UNKNOWN: manifest unknown; unknown tag=x\n";
+  const hidden = "Error: GET https://index.docker.io/v2/org/nope/manifests/v1: UNAUTHORIZED: authentication required; [map[Action:pull]]\n";
+  const denied = "Error: GET https://ghcr.io/token?scope=repository%3Aorg%2Fapp%3Apull&service=ghcr.io: DENIED: requested access to the resource is denied\n";
+  const down = 'Error: Get "https://registry.example.io/v2/": dial tcp: lookup registry.example.io: no such host\n';
+  assert.equal(craneProblem(missing), "no such manifest");
+  assert.equal(craneProblem(hidden), "not pullable without a login (private, or no such repository)");
+  assert.equal(craneProblem(denied), "not pullable without a login (private, or no such repository)");
+  assert.equal(craneProblem(`2026/10/11 retrying\n${down}`), 'Get "https://registry.example.io/v2/": dial tcp: lookup registry.example.io: no such host');
+});
+
+test("a tag or digest is asked for by its full reference", async () => {
+  const { digestOf, calls } = registry({ "org/app:v1": D1, [`org/app@${D1}`]: D1 });
+  assert.deepEqual(await resolveManifest("org/app", "v1", { digestOf, lookup: publicDns }), { digest: D1 });
+  assert.deepEqual(await resolveManifest("org/app", D1, { digestOf, lookup: publicDns }), { digest: D1 });
+  assert.deepEqual(calls, ["org/app:v1", `org/app@${D1}`]);
+});
+
+test("an image anyone can pull is ok", async () => {
+  const { digestOf } = registry({ "org/app:v1": D1 });
+  assert.deepEqual(await checkImage({ repository: "org/app", tag: "v1" }, { digestOf, lookup: publicDns }), {
     level: "ok",
-    message: `org/app:v1: pullable, resolves to ${digestOf(V1)}`,
+    message: `org/app:v1: pullable, resolves to ${D1}`,
   });
-  assert.deepEqual(await checkImage({ repository: "org/app", tag: "v1", digest: digestOf(V1) }, { fetch, lookup: publicDns }), {
+  assert.deepEqual(await checkImage({ repository: "org/app", tag: "v1", digest: D1 }, { digestOf, lookup: publicDns }), {
     level: "ok",
-    message: `org/app:v1@${digestOf(V1)}: pullable, tag matches the pinned digest`,
+    message: `org/app:v1@${D1}: pullable, tag matches the pinned digest`,
   });
 });
 
 test("a missing tag or pinned digest is an error", async () => {
-  const { fetch } = registry({ manifests: { "v1": V1 } });
-  assert.deepEqual(await checkImage({ repository: "org/app", tag: "v2" }, { fetch, lookup: publicDns }), {
+  const { digestOf } = registry({ "org/app:v1": D1 });
+  assert.deepEqual(await checkImage({ repository: "org/app", tag: "v2" }, { digestOf, lookup: publicDns }), {
     level: "error",
     message: "org/app:v2: no such manifest",
   });
-  assert.deepEqual(await checkImage({ repository: "org/app", tag: "v1", digest: digestOf(V2) }, { fetch, lookup: publicDns }), {
+  assert.deepEqual(await checkImage({ repository: "org/app", tag: "v1", digest: D2 }, { digestOf, lookup: publicDns }), {
     level: "error",
-    message: `org/app:v1@${digestOf(V2)}: no such manifest`,
+    message: `org/app:v1@${D2}: no such manifest`,
   });
 });
 
 test("a tag that has moved off its pinned digest warns, or is an error when they must match", async () => {
-  const { fetch } = registry({ manifests: { "v1": V1, [digestOf(V2)]: V2 } });
-  const image = { repository: "org/app", tag: "v1", digest: digestOf(V2) };
-  const moved = `org/app:v1@${digestOf(V2)}: the tag resolves to ${digestOf(V1)} now, not the pinned digest`;
-  assert.deepEqual(await checkImage(image, { fetch, lookup: publicDns }), { level: "warning", message: `${moved}; both are pullable` });
-  assert.deepEqual(await checkImage(image, { fetch, lookup: publicDns, matchDigest: true }), { level: "error", message: moved });
-  assert.equal((await checkImage({ ...image, digest: digestOf(V1) }, { fetch, lookup: publicDns, matchDigest: true })).level, "ok");
-});
-
-test("a registry that names no digest is read from the manifest's bytes", async () => {
-  const { fetch } = registry({ manifests: { "v1": V1 }, digestHeader: false });
-  assert.deepEqual(await resolveManifest("org/app", "v1", { fetch, lookup: publicDns }), { digest: digestOf(V1) });
-});
-
-test("a registry that gives no anonymous token fails", async () => {
-  const { fetch } = registry({ token: null });
-  assert.match((await resolveManifest("org/app", "v1", { fetch, lookup: publicDns })).problem, /no anonymous pull token/);
+  const { digestOf } = registry({ "org/app:v1": D1, [`org/app@${D2}`]: D2 });
+  const image = { repository: "org/app", tag: "v1", digest: D2 };
+  const moved = `org/app:v1@${D2}: the tag resolves to ${D1} now, not the pinned digest`;
+  assert.deepEqual(await checkImage(image, { digestOf, lookup: publicDns }), { level: "warning", message: `${moved}; both are pullable` });
+  assert.deepEqual(await checkImage(image, { digestOf, lookup: publicDns, matchDigest: true }), { level: "error", message: moved });
+  assert.equal((await checkImage({ ...image, digest: D1 }, { digestOf, lookup: publicDns, matchDigest: true })).level, "ok");
 });
 
 test("a registry on a private network fails without being asked", async () => {
-  const { fetch, calls } = registry({ manifests: { "v1": V1 } });
+  const { digestOf, calls } = registry({ "registry.example.io/team/app:v1": D1 });
   const lookup = async () => [{ address: "172.27.133.35" }];
-  assert.match((await resolveManifest("registry.example.io/team/app", "v1", { fetch, lookup })).problem, /registry\.example\.io is on a private network \(172\.27\.133\.35\)/);
+  assert.match((await resolveManifest("registry.example.io/team/app", "v1", { digestOf, lookup })).problem, /registry\.example\.io is on a private network \(172\.27\.133\.35\)/);
   assert.equal(calls.length, 0);
-});
-
-test("a dropped connection is retried", async () => {
-  const { fetch } = registry({ manifests: { "v1": V1 }, failures: 1 });
-  assert.deepEqual(await resolveManifest("org/app", "v1", { fetch, lookup: publicDns }), { digest: digestOf(V1) });
-  const down = registry({ failures: 10 });
-  assert.match((await resolveManifest("org/app", "v1", { fetch: down.fetch, lookup: publicDns, attempts: 2 })).problem, /could not reach registry-1\.docker\.io: ECONNRESET/);
 });
 
 // A perf report as AutoTune writes it: each language carries the comparison.

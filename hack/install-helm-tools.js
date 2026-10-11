@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 "use strict";
 
-// Install the pinned helm and kubeconform into .cache/helm-validation/bin,
-// refusing an archive whose sha256 differs from config.json.
+// Install the pinned helm, kubeconform and crane into .cache/bin, refusing an
+// archive whose sha256 differs from config.json. crane is validate:images's,
+// not helm validation's.
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
@@ -16,13 +17,18 @@ const tools = {
   helm: (version, platform) => [`https://get.helm.sh/helm-v${version}-${platform}.tar.gz`, `${platform}/helm`],
   kubeconform: (version, platform) =>
     [`https://github.com/yannh/kubeconform/releases/download/v${version}/kubeconform-${platform}.tar.gz`, "kubeconform"],
+  crane: (version, platform) => {
+    const [os, arch] = platform.split("-");
+    const target = `${{darwin: "Darwin", linux: "Linux"}[os]}_${{amd64: "x86_64", arm64: "arm64"}[arch]}`;
+    return [`https://github.com/google/go-containerregistry/releases/download/v${version}/go-containerregistry_${target}.tar.gz`, "crane"];
+  },
 };
 
 async function main() {
   const platform = `${process.platform}-${{x64: "amd64", arm64: "arm64"}[process.arch]}`;
   const sums = config.toolChecksums[platform];
   if (!sums) throw new Error(`unsupported platform: ${platform}`);
-  const output = path.join(root, ".cache/helm-validation/bin");
+  const output = path.join(root, ".cache/bin");
   fs.mkdirSync(output, {recursive: true});
   for (const [name, release] of Object.entries(tools)) {
     const version = config[`${name}Version`];

@@ -12,12 +12,12 @@ Needs Node.js 24, `git`, `tar` and network access. Downloads honor
 
 ```sh
 npm ci
-npm run helm:install                                   # pinned helm and kubeconform
+npm run tools:install                                  # pinned helm and kubeconform (and crane, for validate:images)
 npm run validate:helm                                  # every version file
 npm run validate:helm -- --base origin/master          # what a branch changes
 npm run validate:helm -- models/glm5.3/glm5.3-1.0.1.yaml
 npm run validate:helm -- --chart-mode declared
-npm run test:helm
+npm test                                               # unit tests, the Helm validator's among them
 npm run test:helm:integration                          # against released charts
 ```
 

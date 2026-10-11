@@ -34,14 +34,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install pinned Helm and kubeconform
-        run: npm run helm:install
+      - name: Install pinned Helm, kubeconform and crane
+        run: npm run tools:install
 
       - name: validate
         run: npm run validate
 
       # index.json is built here, from models/, and checked against the one live
-      # on the site: a published version must not change (hack/build-site.js).
+      # on the site: a published version must not change (server/data.js).
       - name: Build Pages site and catalog
         run: npm run build:site
         env:

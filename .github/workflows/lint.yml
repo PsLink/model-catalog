@@ -25,14 +25,12 @@ jobs:
       - name: Validate model schemas
         run: npm run validate:schema
 
-      - name: Test the catalog library
-        run: npm run test:lib
+      # The catalog library, the Helm validator, the catalog server and the site.
+      - name: Test
+        run: npm test
 
-      - name: Test Helm validator
-        run: npm run test:helm
-
-      - name: Install pinned Helm and kubeconform
-        run: npm run helm:install
+      - name: Install pinned Helm, kubeconform and crane
+        run: npm run tools:install
 
       - name: Validate every model variant against latest stable charts
         run: npm run validate:helm

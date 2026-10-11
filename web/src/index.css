@@ -1,0 +1,277 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* Hues are picked at run time (hue-${gpuHue(label)}), where Tailwind cannot
+   see them: generate them all. */
+@source inline("hue-{red,orange,yellow,green,blue,purple,grey}");
+
+/* The site's palette is Sonokai's (github.com/sainnhe/sonokai, default style),
+   tuned for high contrast, under shadcn's token names so its components take
+   it as they are. Against the card: foreground >= 15:1, muted-foreground >=
+   7:1, faint >= 4.5:1 on the background too, input borders >= 3:1, and every
+   colored text (links, improvement, labels' ink, selected or not) >= 7:1.
+
+   Dark mode uses Sonokai's darkest steps as surfaces (black background,
+   bg_dim card) and its hues as they are, lightened only where short of 7:1
+   (red, orange, purple); labels color their text with the hue. Its tokens
+   appear twice below: for the system's dark mode, and for the dark theme
+   chosen with the theme button.
+
+   Sonokai is dark-only. Light mode inks with its black; labels keep Sonokai's
+   own hues but put them in the wash and border, with ink near the foreground,
+   since the hues stepped dark enough for text turn olive and brown. The few
+   colored texts (links, improvement, deprecated) are clean dark blue, green
+   and red at 7:1.
+
+   --tint-* set how the tint preset mixes, per mode (see tint below). */
+:root {
+  color-scheme: light;
+  --background: #f0f0f2;
+  --foreground: #181819;
+  --card: #ffffff;
+  --card-foreground: #181819;
+  --popover: #ffffff;
+  --popover-foreground: #181819;
+  --muted: #f3f3f5;
+  --muted-foreground: #545863;
+  --faint: #676c77;
+  --secondary: #f3f3f5;
+  --secondary-foreground: #181819;
+  --border: #cccccd;
+  --input: #7f8490;
+  --primary: #0058ad;
+  --primary-foreground: #ffffff;
+  --accent: rgba(0, 88, 173, 0.09);
+  --accent-foreground: #0058ad;
+  --ring: #0058ad;
+  --success: #046727;
+  --destructive: #a92238;
+  --panel-shadow: 0 1px 2px rgba(24, 24, 25, 0.06), 0 1px 3px rgba(24, 24, 25, 0.08);
+  /* What floats over the page: a select's menu. */
+  --menu-shadow: 0 8px 24px rgba(24, 24, 25, 0.12), 0 2px 6px rgba(24, 24, 25, 0.08);
+  --hue-red: #fc5d7c;
+  --hue-orange: #f39660;
+  --hue-yellow: #e7c664;
+  --hue-green: #9ed072;
+  --hue-blue: #76cce0;
+  --hue-purple: #b39df3;
+  --hue-grey: #7f8490;
+  --tint-ink-pct: 25%;
+  --tint-wash-pct: 22%;
+  --tint-line-pct: 60%;
+  --tint-line-base: var(--foreground);
+  --tint-firm-pct: 40%;
+  --tint-hover-pct: 30%;
+  --tint-sel-ink-pct: 20%;
+  --tint-sel-wash-pct: 40%;
+}
+
+@utility dark-tokens {
+  color-scheme: dark;
+  --background: #181819;
+  --foreground: #fafafb;
+  --card: #222327;
+  --card-foreground: #fafafb;
+  --popover: #222327;
+  --popover-foreground: #fafafb;
+  --muted: #2c2e34;
+  --muted-foreground: #a8aeba;
+  --faint: #858a96;
+  --secondary: #2c2e34;
+  --secondary-foreground: #fafafb;
+  --border: #414550;
+  --input: #666d7d;
+  --primary: #76cce0;
+  --primary-foreground: #181819;
+  --accent: rgba(118, 204, 224, 0.16);
+  --accent-foreground: #76cce0;
+  --ring: #76cce0;
+  --success: #9ed072;
+  --destructive: #ff89a4;
+  --panel-shadow: none;
+  --menu-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --hue-red: #ff89a4;
+  --hue-orange: #f49761;
+  --hue-yellow: #e7c664;
+  --hue-green: #9ed072;
+  --hue-blue: #76cce0;
+  --hue-purple: #b7a1f7;
+  --hue-grey: #a8aeba;
+  --tint-ink-pct: 85%;
+  --tint-wash-pct: 8%;
+  --tint-line-pct: 50%;
+  --tint-line-base: var(--border);
+  --tint-firm-pct: 100%;
+  --tint-hover-pct: 14%;
+  --tint-sel-ink-pct: 65%;
+  --tint-sel-wash-pct: 16%;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    @apply dark-tokens;
+  }
+}
+:root[data-theme="dark"] {
+  @apply dark-tokens;
+}
+
+/* dark: is the theme in effect, chosen or the system's. */
+@custom-variant dark {
+  &:where([data-theme="dark"], [data-theme="dark"] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme="light"]), :root:not([data-theme="light"]) *) {
+      @slot;
+    }
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-faint: var(--faint);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-destructive: var(--destructive);
+  --shadow-panel: var(--panel-shadow);
+  --shadow-menu: var(--menu-shadow);
+  /* Badges, chips, controls, lists, panels, cards. */
+  --radius-sm: 5px;
+  --radius-chip: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-2xl: 14px;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* Page titles. */
+  --font-display: "Fraunces Variable", Georgia, serif;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font: 15px/1.5 var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+  a {
+    color: var(--primary);
+  }
+  a:hover {
+    text-decoration: underline;
+  }
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.86em;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  button {
+    cursor: pointer;
+  }
+}
+
+/* The page's column. */
+@utility wrap {
+  max-width: 1600px;
+  margin-inline: auto;
+  padding-inline: 16px;
+  @media (min-width: 720px) {
+    padding-inline: 24px;
+  }
+  @media (min-width: 1200px) {
+    padding-inline: 40px;
+  }
+}
+
+/* One color preset for every colored label -- toggles, chips, badges, GPU
+   names. An element only picks a hue (hue-*); the preset mixes ink, wash and
+   border from it by the mode's --tint-* amounts (dark: colored ink on a faint
+   wash; light: near-foreground ink on a clear pastel wash). Interactive ones
+   deepen on hover; a pressed toggle deepens further, firms its border and
+   adds a check. */
+@utility tint {
+  --tint-ink: color-mix(in oklab, var(--hue) var(--tint-ink-pct), var(--foreground));
+  --tint-wash: color-mix(in oklab, var(--hue) var(--tint-wash-pct), var(--card));
+  --tint-line: color-mix(in oklab, var(--hue) var(--tint-line-pct), var(--tint-line-base));
+  --tint-firm: color-mix(in oklab, var(--hue) var(--tint-firm-pct), var(--tint-line-base));
+  color: var(--tint-ink);
+  background: var(--tint-wash);
+  border: 1px solid var(--tint-line);
+}
+@utility tint-hover {
+  &:hover {
+    color: var(--tint-ink);
+    background: color-mix(in oklab, var(--hue) var(--tint-hover-pct), var(--card));
+    border-color: var(--tint-firm);
+  }
+}
+/* Pressed: a deeper wash, so the ink leans further toward the foreground to
+   stay at 7:1; the firm border, weight and check carry the state. */
+@utility tint-pressed {
+  &[data-state="on"] {
+    color: color-mix(in oklab, var(--hue) var(--tint-sel-ink-pct), var(--foreground));
+    font-weight: 600;
+    background: color-mix(in oklab, var(--hue) var(--tint-sel-wash-pct), var(--card));
+    border-color: var(--tint-firm);
+    box-shadow: inset 0 0 0 1px var(--tint-firm);
+  }
+  &[data-state="on"]::before {
+    content: "";
+    width: 0.55em;
+    height: 0.3em;
+    margin: 0 0.05em 0.2em 0;
+    border-left: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: rotate(-45deg);
+  }
+  &:focus-visible {
+    outline-color: var(--tint-firm);
+  }
+}
+@utility hue-red {
+  --hue: var(--hue-red);
+}
+@utility hue-orange {
+  --hue: var(--hue-orange);
+}
+@utility hue-yellow {
+  --hue: var(--hue-yellow);
+}
+@utility hue-green {
+  --hue: var(--hue-green);
+}
+@utility hue-blue {
+  --hue: var(--hue-blue);
+}
+@utility hue-purple {
+  --hue: var(--hue-purple);
+}
+@utility hue-grey {
+  --hue: var(--hue-grey);
+}
