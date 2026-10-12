@@ -75,6 +75,25 @@ export interface Index {
   models: IndexModel[];
 }
 
+// models/<name>/<id>.history.json: a variant file's revisions, from git.
+export interface Revision {
+  version: string;
+  // The commit's date; absent, as the commit is, for an uncommitted edit.
+  releaseDate?: string;
+  commit?: string;
+  digest: string;
+  subject: string;
+}
+
+export interface History {
+  model: string;
+  id: string;
+  path: string;
+  // Newest first.
+  revisions: Revision[];
+  deleted?: { commit: string; subject: string };
+}
+
 export interface Workload {
   name: string;
   upliftPct: number;
@@ -116,6 +135,8 @@ export interface Variant {
   path: string;
   // The variant file on GitHub, pinned to its commit.
   source: string | null;
+  // Its history.json, from the site's root.
+  history: string;
   servedName: string | null;
   engine: string;
   default: boolean;
@@ -150,6 +171,8 @@ export interface Model {
 }
 
 export interface Catalog {
+  // The GitHub repository the variant files live in.
+  repo: string | null;
   count: number;
   models: Model[];
 }

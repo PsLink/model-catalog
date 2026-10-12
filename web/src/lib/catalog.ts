@@ -138,6 +138,7 @@ function variantOf(index: Index, m: IndexModel, v: IndexVariant, tuning: Tuning[
     releaseDate: v.releaseDate || null,
     path: v.path,
     source: index.repo && v.commit ? `${index.repo}/blob/${v.commit}/${encodePath(v.path)}` : null,
+    history: v.history,
     servedName: v.servedName || null,
     engine: v.engine,
     // The first variant when metadata.yaml names none.
@@ -177,7 +178,7 @@ export function catalogOf(index: Index): Catalog {
       tuning,
     };
   });
-  return { count: models.length, models };
+  return { repo: index.repo || null, count: models.length, models };
 }
 
 // The pairs shown on an optimized variant: those of the newest version of it
@@ -187,6 +188,16 @@ export function tuningFor(m: Model, id: string): Tuning[] {
   if (!mine.length) return [];
   const newest = mine.map((t) => t.optimizedVersion).reduce((a, b) => (compareVersions(a, b) >= 0 ? a : b));
   return mine.filter((t) => t.optimizedVersion === newest);
+}
+
+// What a version of a variant was benchmarked as, for its revision history:
+// the tuned or the baseline side of a recorded pair; null when neither.
+export function measuredAs(m: Model, id: string, version: string): string | null {
+  const t = m.tuning.find((t) => (t.optimizedId === id && t.optimizedVersion === version) || (t.baselineId === id && t.baselineVersion === version));
+  if (!t) return null;
+  return t.optimizedId === id
+    ? `Measured as the tuned variant${t.upliftLabel ? `: ${t.upliftLabel}` : ""} vs ${t.baselineId}@${t.baselineVersion}`
+    : `Measured as the baseline for ${t.optimizedId}@${t.optimizedVersion}`;
 }
 
 // A result per model (or per its variants list) and argument, computed once:

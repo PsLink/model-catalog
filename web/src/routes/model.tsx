@@ -14,15 +14,17 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Bar, chartCode, DeprecatedBadge, Fact, GpuToggles, Hardware, imageCode, NEW_TAB, ROOT, VariantBadges } from "@/components/catalog";
+import { VariantHistory } from "@/components/history";
 import { icons } from "@/components/icons";
 import { SiteFooter, SiteHeader } from "@/components/site";
 
 export async function modelLoader({ params }: LoaderFunctionArgs) {
-  const m = (await loadCatalog()).models.find((x) => x.name === params.dir);
+  const catalog = await loadCatalog();
+  const m = catalog.models.find((x) => x.name === params.dir);
   if (!m) throw new Response(`No model ${params.dir} in this catalog.`, { status: 404 });
   // Each variant's configuration is its own file.
   const texts = await Promise.all(m.variants.map(loadVariantText));
-  return { m, yaml: Object.fromEntries(m.variants.map((v, i) => [v.id, texts[i]])) as Record<string, string | null> };
+  return { m, repo: catalog.repo, yaml: Object.fromEntries(m.variants.map((v, i) => [v.id, texts[i]])) as Record<string, string | null> };
 }
 
 // The GPU filter only changes the query: the model and its files stay.
@@ -93,7 +95,7 @@ const fact = {
   dd: "mt-[0.1rem] text-[0.86rem] wrap-anywhere",
 };
 
-function VariantDetail({ m, v, scale, yaml, targeted }: { m: Model; v: Variant; scale: number; yaml: string | null; targeted: boolean }) {
+function VariantDetail({ m, v, repo, scale, yaml, targeted }: { m: Model; v: Variant; repo: string | null; scale: number; yaml: string | null; targeted: boolean }) {
   const anchor = anchorOf(v.id);
   const pairs = tuningFor(m, v.id);
   // Optimized variants measured against this one.
@@ -125,6 +127,7 @@ function VariantDetail({ m, v, scale, yaml, targeted }: { m: Model; v: Variant; 
               </a>
             </Button>
           )}
+          <VariantHistory m={m} v={v} repo={repo} />
           {v.source && (
             <Button size="sm" asChild>
               <a href={v.source} {...NEW_TAB} title={`Pinned to commit ${v.source.split("/blob/")[1].slice(0, 7)}`}>
@@ -216,7 +219,7 @@ function Facts({ items }: { items: ReactNode[] }) {
 }
 
 export function ModelRoute() {
-  const { m, yaml } = useLoaderData() as Awaited<ReturnType<typeof modelLoader>>;
+  const { m, repo, yaml } = useLoaderData() as Awaited<ReturnType<typeof modelLoader>>;
   const variants = orderedVariants(m);
   const { hash } = useLocation();
   const navigate = useNavigate();
@@ -322,6 +325,7 @@ export function ModelRoute() {
                 key={v.id}
                 m={m}
                 v={v}
+                repo={repo}
                 scale={scale}
                 yaml={yaml[v.id]?.replace(/\s+$/, "") || null}
                 targeted={hash === `#${anchorOf(v.id)}`}

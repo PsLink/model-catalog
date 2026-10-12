@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { Index, Model, Tuning, Variant } from "../types";
-import { catalogOf, hardwareLabels, hardwareShort, orderedVariants, reportLinks, tuningFor, variantBest } from "./catalog";
+import { catalogOf, hardwareLabels, hardwareShort, measuredAs, orderedVariants, reportLinks, tuningFor, variantBest } from "./catalog";
 import { computeSummary, sorter, variantFacetsOf, type Facet } from "./facets";
 import { compareVersions } from "./versions";
 
@@ -10,6 +10,7 @@ const variant = (id: string, over: Partial<Variant> = {}): Variant => ({
   releaseDate: null,
   path: `models/m/${id}.yaml`,
   source: null,
+  history: `models/m/${id}.history.json`,
   servedName: null,
   engine: "sglang",
   default: false,
@@ -82,6 +83,12 @@ describe("tuning", () => {
 
   test("optimized variants come first, the biggest improvement first", () => {
     expect(orderedVariants(m).map((v) => v.id)).toEqual(["faster", "fast", "base"]);
+  });
+
+  test("a revision says which side of a pair it was measured as, if any", () => {
+    expect(measuredAs(m, "fast", "1.0.0")).toBe("Measured as the tuned variant: +10% vs base@1.0.0");
+    expect(measuredAs(m, "base", "1.0.1")).toBe("Measured as the baseline for faster@1.0.1");
+    expect(measuredAs(m, "fast", "1.0.1")).toBeNull();
   });
 });
 

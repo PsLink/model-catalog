@@ -1,4 +1,4 @@
-import type { Catalog, Index, Variant } from "@/types";
+import type { Catalog, History, Index, Variant } from "@/types";
 import { catalogOf, encodePath } from "./catalog";
 
 const ROOT = import.meta.env.BASE_URL;
@@ -23,4 +23,22 @@ export function loadCatalog(): Promise<Catalog> {
 export async function loadVariantText(v: Variant): Promise<string | null> {
   const res = await fetch(ROOT + encodePath(v.path));
   return res.ok ? res.text() : null;
+}
+
+// A variant's history.json, fetched once per visit, when first asked for.
+const histories = new Map<string, Promise<History>>();
+
+export function loadHistory(v: Variant): Promise<History> {
+  let h = histories.get(v.history);
+  if (!h) {
+    h = fetch(ROOT + encodePath(v.history)).then((res) => {
+      if (!res.ok) {
+        histories.delete(v.history);
+        throw new Error(`${v.history}: ${res.status}`);
+      }
+      return res.json();
+    });
+    histories.set(v.history, h);
+  }
+  return h;
 }
