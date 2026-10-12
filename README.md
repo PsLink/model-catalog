@@ -126,33 +126,9 @@ linking it. The images it records must be the two variants' own (registry, repos
 
 Needs Node.js 24.
 
-- **Backend and frontend, one GitHub Pages site.** The backend is the catalog
-  server (`server/`): it serves `index.json` and the version files swiss
-  reads, the perf reports, and `catalog.json`, live from `models/`
-  (`npm run serve`). The Pages build writes the same files out statically
-  beside the web app, so one site at `catalog.yaml`'s `site` is both the
-  catalog swiss reads and the pages people browse; `models/<name>/index.html`
-  is a model's page, so no report may take that name. `catalog.json` carries what the index does not yet (images,
-  served names, commit-pinned source links) and goes once the index schema
-  does. The frontend is a single-page React app in `web/` (Vite, React
-  Router, Tailwind and [shadcn/ui](https://ui.shadcn.com) components) that
-  renders from it, so it needs JavaScript. `npm run dev:site` starts both and
-  proxies the page's data requests to the server; `CATALOG=<url>` points it at
-  another one. The site lives under the path of `catalog.yaml`'s `site`
-  (`/model-catalog/`), and every page keeps its URL.
-  The shadcn components live in `web/src/components/ui`, restyled to the
-  site's palette in `web/src/index.css`; `npx shadcn view <name> --cwd web`
-  prints another to copy in.
-- **CI.** `lints` runs on pull requests: `validate:schema`, `npm test`, then
-  `validate:helm` against the latest stable charts
-  ([Helm validation](schema/crds/README.md)) and `validate:images --match-digest`,
-  both on every version file. `pages` builds the site on pull requests and
-  deploys it on push to `master`.
-- **`index.json` is generated, not committed.** It is a pure function of
-  `models/` and `catalog.yaml`, with no timestamp, so the same tree gives the
-  same catalog ref in swiss.
-- **Published versions don't change.** The Pages build compares every version
-  file against the live `index.json`:
+- **Backend and frontend, one GitHub Pages site.**
+- **`index.json` is generated, not committed.** It is a pure function of `models/` and `catalog.yaml`, with no timestamp, so the same tree gives the same catalog ref in swiss.
+- **Published versions don't change.** The Pages build compares every version file against the live `index.json`:
 
   | `REWRITES` | when | does |
   | --- | --- | --- |
@@ -160,7 +136,5 @@ Needs Node.js 24.
   | `warn` | pull request | reports it |
   | `allow` | manual run with *allow rewrites* | publishes the in-place edit |
 
-  `PUBLISHED_INDEX=<url|file|none>` changes what the build compares against;
-  `none` builds offline.
-- **swissd refuses an `index.json` field it does not know.** A new field must
-  be understood by every swissd reading this catalog before it merges.
+  `PUBLISHED_INDEX=<url|file|none>` changes what the build compares against; `none` builds offline.
+- **swissd refuses an `index.json` field it does not know.** A new field must be understood by every swissd reading this catalog before it merges.
