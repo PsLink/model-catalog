@@ -1,4 +1,6 @@
-// The models list, a page of its own beside the deployment recipes.
+// The models list: a legacy page of its own, reached only from the deployment
+// recipes' "All models" link. Everything else -- a model page's family and tag
+// chips, its breadcrumb, a missing page -- leads back to the recipes.
 import { Fragment, memo, useEffect, useMemo } from "react";
 import { Link, useRouteLoaderData } from "react-router";
 import type { Catalog, Model } from "@/types";
