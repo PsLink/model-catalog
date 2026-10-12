@@ -186,8 +186,7 @@
         "engine",
         "chart",
         "requires",
-        "history",
-        "releaseDate"
+        "history"
       ],
       "properties": {
         "id": {
@@ -198,6 +197,7 @@
           "type": "string"
         },
         "releaseDate": {
+          "description": "When this version was released: its commit's committer date, in UTC. Absent when uncommitted.",
           "type": "string",
           "format": "date"
         },

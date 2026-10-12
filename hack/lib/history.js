@@ -27,8 +27,9 @@ function blobs(root, specs) {
 }
 
 // Changes to models/<name>/*.yaml on HEAD's first-parent chain, oldest first:
-// path -> [{commit, subject, deleted, bytes}]. last is the last commit touching
-// models/ or catalog.yaml.
+// path -> [{commit, date, subject, deleted, bytes}], date the commit's UTC
+// committer date (YYYY-MM-DD). last is the last commit touching models/ or
+// catalog.yaml.
 function fileHistory(root) {
   if (git(root, ["rev-parse", "--is-shallow-repository"]).toString().trim() === "true") {
     throw new Error("a shallow clone: date versions need the full history (actions/checkout with fetch-depth: 0, or git fetch --unshallow)");
@@ -43,7 +44,7 @@ function fileHistory(root) {
     "--no-renames",
     "--name-status",
     "-z",
-    "--format=%x1e%H%x1f%s",
+    "--format=%x1e%H%x1f%ct%x1f%s",
     "--",
     "models",
     "catalog.yaml",
@@ -52,13 +53,14 @@ function fileHistory(root) {
   const pending = [];
   for (const record of log.split("\x1e").slice(1)) {
     const end = record.indexOf("\0");
-    const [commit, subject] = record.slice(0, end).split("\x1f");
+    const [commit, time, subject] = record.slice(0, end).split("\x1f");
+    const date = new Date(Number(time) * 1000).toISOString().slice(0, 10);
     last = commit;
     const fields = record.slice(end + 1).replace(/^\n/, "").split("\0");
     for (let i = 0; i + 1 < fields.length; i += 2) {
       const [status, file] = [fields[i], fields[i + 1]];
       if (!/^models\/[^/]+\/[^/]+\.yaml$/.test(file) || file.endsWith("/metadata.yaml")) continue;
-      const change = { commit, subject, deleted: status === "D", bytes: null };
+      const change = { commit, date, subject, deleted: status === "D", bytes: null };
       if (!files.has(file)) files.set(file, []);
       files.get(file).push(change);
       if (!change.deleted) pending.push([change, `${commit}:${file}`]);

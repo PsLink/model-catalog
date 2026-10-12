@@ -14,7 +14,7 @@ const {root, modelsDir, readYaml, versionFiles, variantFiles, compareVersions, l
 
 const STRINGIFY = {lineWidth: 0}
 
-function migrate(name, {releaseDate = new Date().toISOString().slice(0, 10)} = {}) {
+function migrate(name) {
   const dir = path.join(modelsDir, name)
   const metaPath = path.join(dir, "metadata.yaml")
   if (!fs.existsSync(metaPath)) throw new Error(`models/${name}/: no such model`)
@@ -45,11 +45,10 @@ function migrate(name, {releaseDate = new Date().toISOString().slice(0, 10)} = {
     const own = item.items.filter((p) => p.key.value !== "default")
     doc.contents.items.push(own.find((p) => p.key.value === "id"))
     doc.set("version", latest)
-    doc.set("releaseDate", releaseDate)
     if (servedName != null) doc.set("servedName", servedName)
     doc.contents.items.push(...own.filter((p) => p.key.value !== "id"))
     const body = doc.toString(STRINGIFY)
-    const {apiVersion, kind, model, version: v, releaseDate: r, servedName: served, ...rest} = YAML.parse(body)
+    const {apiVersion, kind, model, version: v, servedName: served, ...rest} = YAML.parse(body)
     const {default: _, ...was} = item.toJSON()
     if (!isDeepStrictEqual(rest, was) || served !== (servedName ?? undefined)) throw new Error(`${name}: ${id} would not migrate unchanged`)
     out.set(`models/${name}/${id}.yaml`, body)

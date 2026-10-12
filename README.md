@@ -126,7 +126,6 @@ kind: Variant
 model: kimi-k3
 id: sglang-tp8-pp4-6000d
 version: 1.0.5                     # semver, raised on every change
-releaseDate: 2026-10-12
 servedName: kimi-k3
 engine: sglang
 chart: { name: sglang, version: ">=0.7.0" }

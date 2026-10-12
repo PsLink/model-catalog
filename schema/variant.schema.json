@@ -11,7 +11,6 @@
     "model",
     "id",
     "version",
-    "releaseDate",
     "engine",
     "chart",
     "requires"
@@ -32,14 +31,9 @@
       "$ref": "version.schema.json#/$defs/variant/properties/id"
     },
     "version": {
-      "description": "Semver, raised on every change to this file.",
+      "description": "Semver, raised on every change to this file. Its release date is the commit's, in index-v2.json.",
       "type": "string",
       "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$"
-    },
-    "releaseDate": {
-      "description": "When this version was released.",
-      "type": "string",
-      "format": "date"
     },
     "servedName": {
       "description": "--served-model-name, when it differs from the model name.",

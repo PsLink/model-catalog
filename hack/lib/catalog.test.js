@@ -74,7 +74,6 @@ const variant = (id, version = "1.0.0", gpus = 8) => ({
   model: "m2",
   id,
   version,
-  releaseDate: "2026-10-01",
   engine: "sglang",
   chart: { name: "sglang", version: ">=0.7.0" },
   requires: { gpus },
@@ -109,7 +108,7 @@ test("index-v2 lists only v2 models, each variant file at its latest version", (
   const repo = fixture([
     ["2026-10-01T10:00:00Z", "init", catalogFiles],
     ["2026-10-02T08:00:00Z", "tp8: one", { "models/m2/sglang-tp8.yaml": variant("sglang-tp8", "1.0.1", 7) }],
-    ["2026-10-02T09:00:00Z", "tp8: two", { "models/m2/sglang-tp8.yaml": variant("sglang-tp8", "1.1.0", 6) }],
+    ["2026-10-02T21:00:00-05:00", "tp8: two", { "models/m2/sglang-tp8.yaml": variant("sglang-tp8", "1.1.0", 6) }],
     ["2026-10-03T09:00:00Z", "drop tp4", { "models/m2/sglang-tp4.yaml": null }],
   ]);
   const built = buildIndexV2({ root: repo.dir, warn: () => {} });
@@ -122,6 +121,9 @@ test("index-v2 lists only v2 models, each variant file at its latest version", (
   assert.deepEqual(m2.variants.map((v) => [v.id, v.version, v.commit, v.history]), [["sglang-tp8", "1.1.0", repo.sha(1), "models/m2/sglang-tp8.history.json"]]);
   const tp8 = histories.get("models/m2/sglang-tp8.yaml");
   assert.deepEqual(tp8.revisions.map((r) => [r.version, r.subject]), [["1.1.0", "tp8: two"], ["1.0.1", "tp8: one"], ["1.0.0", "init"]]);
+  // Each version's release date is its commit's, in UTC.
+  assert.equal(m2.variants[0].releaseDate, "2026-10-03");
+  assert.deepEqual(tp8.revisions.map((r) => r.releaseDate), ["2026-10-03", "2026-10-02", "2026-10-01"]);
   assert.equal(tp8.revisions[0].digest, m2.variants[0].digest);
   const tp4 = histories.get("models/m2/sglang-tp4.yaml");
   assert.deepEqual([tp4.revisions.map((r) => r.version), tp4.deleted.subject], [["1.0.0"], "drop tp4"]);
@@ -136,7 +138,8 @@ test("a change must raise the version, and a raised version must change somethin
   assert.deepEqual(revisionProblems({ root: repo.dir }), [["models/m2/sglang-tp8.yaml", "working copy: version 1.0.1 changes nothing else"]]);
   repo.write({ "models/m2/sglang-tp8.yaml": variant("sglang-tp8", "1.0.1", 7) });
   const { index } = buildIndexV2({ root: repo.dir, warn: () => {} });
-  assert.deepEqual([index.models[0].variants[1].version, index.models[0].variants[1].commit], ["1.0.1", undefined]);
+  const tp8 = index.models[0].variants[1];
+  assert.deepEqual([tp8.version, tp8.commit, tp8.releaseDate], ["1.0.1", undefined, undefined]);
   assert.deepEqual(revisionProblems({ root: repo.dir }), []);
 });
 

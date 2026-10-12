@@ -212,14 +212,14 @@ function linkableReports(base, name, warn) {
 }
 
 // Every v2 variant's revisions, oldest first, by path, deleted ones included.
-// An uncommitted edit is a revision with no commit.
+// A revision's release date is its commit's; an uncommitted edit has neither.
 function variantRevisions(files, base) {
   const out = new Map();
   for (const [rel, changes] of files) {
     const revisions = changes
       .map((c) => ({ c, doc: c.bytes && parseOrNull(c.bytes) }))
       .filter(({ doc }) => kindOf(doc) === "variant")
-      .map(({ c, doc }) => ({ doc, commit: c.commit, subject: c.subject, digest: digest(c.bytes) }));
+      .map(({ c, doc }) => ({ doc, commit: c.commit, releaseDate: c.date, subject: c.subject, digest: digest(c.bytes) }));
     if (revisions.length) out.set(rel, { revisions, gone: changes.at(-1).deleted ? changes.at(-1) : null });
   }
   for (const name of modelNames(path.join(base, "models"))) {
@@ -242,7 +242,7 @@ function historyDoc(rel, { revisions, gone }) {
     id: file.replace(/\.yaml$/, ""),
     path: rel,
     revisions: revisions
-      .map((r) => ({ version: r.doc.version, releaseDate: r.doc.releaseDate, commit: r.commit, digest: r.digest, subject: r.subject }))
+      .map((r) => ({ version: r.doc.version, releaseDate: r.releaseDate, commit: r.commit, digest: r.digest, subject: r.subject }))
       .reverse(),
     deleted: gone && { commit: gone.commit, subject: gone.subject },
   });
@@ -254,7 +254,7 @@ function historiesOf({ root: base = root } = {}) {
 
 // Each change to a variant file raises its version, and changes more than that.
 function revisionProblems({ root: base = root } = {}) {
-  const strip = ({ version, releaseDate, ...rest }) => rest;
+  const strip = ({ version, ...rest }) => rest;
   const out = [];
   for (const [rel, { revisions }] of variantRevisions(fileHistory(base).files, base)) {
     revisions.forEach((r, i) => {
@@ -354,7 +354,7 @@ function v2Variants(base, name, histories) {
     return {
       id: doc.id,
       version: doc.version,
-      releaseDate: doc.releaseDate,
+      releaseDate: top.releaseDate,
       commit: top.commit,
       path: rel,
       digest: digest(body),
