@@ -1,0 +1,6 @@
+# Beside .gitignore, which prettier also reads.
+#
+# A variant file is pinned by its sha256 and changed only with a raised
+# version: reformatting one is a change of its own.
+models/
+package-lock.json
