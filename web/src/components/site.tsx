@@ -1,8 +1,8 @@
-// What every page has around its content: the header, with the GitHub link
-// and the theme button, and the footer.
+// What every page has around its content: the header, with the logo, the
+// GitHub links and the theme button, and the footer.
 import { useEffect, useState, type ReactNode } from "react";
+import { Link } from "react-router";
 import { StarIcon } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { icons } from "./icons";
 
@@ -97,12 +97,10 @@ function GitHubLink({ repo, title }: { repo: string; title: string }) {
   );
 }
 
-// A page's header: its title centered, then what it is. The GitHub links --
-// modelsphere, then the catalog's source -- and the theme sit top right, with
-// the breadcrumb, when the page is not the catalog itself, top left on their
-// line -- or, on a screen too narrow for both, on a line of its own below
-// them. Without one, on a wide screen, the buttons sit beside the title.
-// children follow the description, centered too.
+// A page's header: the logo top left, linking home, and the GitHub links --
+// modelsphere, then the catalog's source -- and the theme top right; then the
+// breadcrumb, when the page is not the catalog itself; then its title
+// centered, and what it is. children follow the description, centered too.
 export function SiteHeader({
   eyebrow,
   title,
@@ -115,32 +113,29 @@ export function SiteHeader({
   children?: ReactNode;
 }) {
   return (
-    <header className={cn("pt-5 pb-6 min-[1024px]:pb-8", !eyebrow && "min-[1024px]:pt-12")}>
+    <header className="pt-5 pb-6 min-[1024px]:pb-8">
       <div className="wrap">
-        <div className="relative">
-          <div
-            className={cn(
-              "mb-4 flex flex-wrap-reverse items-center justify-end gap-x-2 gap-y-3",
-              eyebrow ? "min-[1024px]:mb-6" : "min-[1024px]:absolute min-[1024px]:-top-6 min-[1024px]:right-0 min-[1024px]:mb-0"
-            )}
-          >
-            {eyebrow && (
-              <p className="mr-auto text-[0.75rem] tracking-[0.08em] text-muted-foreground uppercase [&_a]:text-inherit">{eyebrow}</p>
-            )}
-            {/* The buttons wrap together, never one by one. */}
-            <div className="flex gap-2">
-              <GitHubLink repo={MODELSPHERE} title="modelsphere, the deployment solution, on GitHub" />
-              <GitHubLink repo={__REPO__} title="This catalog's source on GitHub" />
-              <ThemeButton />
-            </div>
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-3 min-[1024px]:mb-8">
+          {/* The mark's black ink turns white in dark mode, its blues kept. */}
+          <Link to="/" className="shrink-0">
+            <img src={`${import.meta.env.BASE_URL}logo.png`} alt="ModelSphere" className="h-6 w-auto min-[720px]:h-7 dark:invert dark:hue-rotate-180" />
+          </Link>
+          {/* The buttons wrap together, never one by one. */}
+          <div className="ml-auto flex gap-2">
+            <GitHubLink repo={MODELSPHERE} title="ModelSphere, the deployment solution, on GitHub" />
+            <GitHubLink repo={__REPO__} title="This catalog's source on GitHub" />
+            <ThemeButton />
           </div>
-          <div className="text-center">
-            <h1 className="font-display text-[clamp(2.5rem,7vw,3.75rem)] leading-[1.05] font-semibold tracking-[-0.02em] [&_em]:text-primary [&_em]:italic">
-              {title}
-            </h1>
-            {description && <p className="mx-auto mt-4 max-w-[52rem] text-[1.05rem] text-balance text-foreground/80">{description}</p>}
-            {children && <div className="mt-5 flex flex-col items-center gap-4">{children}</div>}
-          </div>
+        </div>
+        {eyebrow && (
+          <p className="mb-4 text-[0.75rem] tracking-[0.08em] text-muted-foreground uppercase min-[1024px]:mb-6 [&_a]:text-inherit">{eyebrow}</p>
+        )}
+        <div className="text-center">
+          <h1 className="font-display text-[clamp(2.5rem,7vw,3.75rem)] leading-[1.05] font-semibold tracking-[-0.02em] [&_em]:text-primary [&_em]:italic">
+            {title}
+          </h1>
+          {description && <p className="mx-auto mt-4 max-w-[52rem] text-[1.05rem] text-balance text-foreground/80">{description}</p>}
+          {children && <div className="mt-5 flex flex-col items-center gap-4">{children}</div>}
         </div>
       </div>
     </header>

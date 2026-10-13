@@ -172,7 +172,7 @@ export function VariantsRoute() {
               <span className="block">
                 For the deployment solution, see{" "}
                 <a href="https://github.com/modelsphere/modelsphere" {...NEW_TAB}>
-                  modelsphere
+                  ModelSphere
                 </a>
                 .
               </span>

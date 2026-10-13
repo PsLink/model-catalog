@@ -21,6 +21,7 @@
 //   models/<name>/index.html
 //   404.html
 //   assets/                    the page's scripts and styles
+//   logo.png, icon.png         the header's logo and the site icon, from asserts/
 //   index-v2.json              what the page renders from, built from models/
 //                              and git history
 //   models/<name>/<id>.yaml    every variant file it names, and its
@@ -136,6 +137,7 @@ export default defineConfig({
   root: web,
   define: { __REPO__: JSON.stringify(repoUrl) },
   base,
+  publicDir: path.join(repo, "asserts"),
   // With the repository's node_modules, not a second one in web/.
   cacheDir: path.join(repo, "node_modules/.vite"),
   plugins: [react(), tailwindcss(), catalogSite()],
