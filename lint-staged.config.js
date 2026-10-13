@@ -8,5 +8,8 @@ module.exports = {
   // tsc checks the site as one project, not a file at a time: web/tsconfig.json
   // gives it the paths and types.
   "*.{ts,tsx,mts}": ["prettier --write", () => "tsc -p web"],
-  "*.css": "prettier --write",
+  // Prettier parses each, so invalid JSON or YAML stops the commit too. A
+  // variant file is formatted before validate:schema digests it: the commit
+  // carries the formatted file, and its raised version covers that.
+  "*.{css,json,yaml,yml}": "prettier --write",
 };
