@@ -27,13 +27,7 @@ function ThemeButton() {
     setTheme(t);
   };
   return (
-    <Button
-      type="button"
-      id="theme-toggle"
-      title={`Theme: ${theme} (click to change)`}
-      onClick={next}
-      className={topButton}
-    >
+    <Button type="button" id="theme-toggle" title={`Theme: ${theme} (click to change)`} onClick={next} className={topButton}>
       {THEMES.map((t) => (
         <span key={t} data-icon={t} hidden={t !== theme} className="inline-flex">
           {icons[t]}
@@ -118,7 +112,11 @@ export function SiteHeader({
         <div className="mb-6 flex flex-wrap items-center justify-between gap-x-4 gap-y-3 min-[1024px]:mb-8">
           {/* The mark's black ink turns white in dark mode, its blues kept. */}
           <Link to="/" className="shrink-0">
-            <img src={`${import.meta.env.BASE_URL}logo.png`} alt="ModelSphere" className="h-6 w-auto min-[720px]:h-7 dark:invert dark:hue-rotate-180" />
+            <img
+              src={`${import.meta.env.BASE_URL}logo.png`}
+              alt="ModelSphere"
+              className="h-6 w-auto min-[720px]:h-7 dark:invert dark:hue-rotate-180"
+            />
           </Link>
           {/* The buttons wrap together, never one by one. */}
           <div className="ml-auto flex gap-2">

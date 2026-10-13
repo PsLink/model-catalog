@@ -5,12 +5,7 @@
   "description": "models/<name>/<name>-<version>.yaml: one model at one version, and the variants it can be served as. Everything that decides what a deploy renders lives here, so a published file is immutable -- consumers pin the version and verify its digest. Cosmetic fields live in metadata.yaml beside it. A variant is a hardware and parallelism decision, not a deploy: anything site-specific (namespace, host paths, registry mirrors, route ConfigMaps) or per-deploy (replicas, scaling, scheduling, routing) is rejected here by design.",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "apiVersion",
-    "name",
-    "version",
-    "variants"
-  ],
+  "required": ["apiVersion", "name", "version", "variants"],
   "properties": {
     "apiVersion": {
       "const": "catalog.swiss/v1"
@@ -44,12 +39,7 @@
     "variant": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "id",
-        "engine",
-        "chart",
-        "requires"
-      ],
+      "required": ["id", "engine", "chart", "requires"],
       "properties": {
         "id": {
           "description": "Unique within this entry. Convention: <engine>-<parallelism>-<hardware>, e.g. sglang-tp8-b300.",
@@ -71,25 +61,16 @@
           "type": "boolean"
         },
         "engine": {
-          "enum": [
-            "sglang",
-            "vllm"
-          ]
+          "enum": ["sglang", "vllm"]
         },
         "chart": {
           "description": "Chart name and version only. Never a repository -- the site profile maps the name to its own registry, because this file cannot know it.",
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "name",
-            "version"
-          ],
+          "required": ["name", "version"],
           "properties": {
             "name": {
-              "enum": [
-                "sglang",
-                "vllm"
-              ]
+              "enum": ["sglang", "vllm"]
             },
             "version": {
               "description": "One chart version, or a range of them in helm's constraint syntax. A bare version pins exactly: 0.8.0 is 0.8.0 and nothing else. A range lets a chart fix reach this model version without publishing a new one: >=0.8.0, ^0.8.0 (0.8.x from 0.8.0), >=0.8.0 <0.9.0. A deploy records the one version the range resolved to, so the deploy itself stays pinned. Prereleases match only a range that names one.",
@@ -102,10 +83,7 @@
           "description": "Canonical upstream engine image. The site profile rewrites the repository to its mirror; the tag is carried through as-is.",
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "repository",
-            "tag"
-          ],
+          "required": ["repository", "tag"],
           "properties": {
             "repository": {
               "type": "string",
@@ -125,9 +103,7 @@
           "description": "What this variant needs to schedule at all. Preflight checks these against real nodes; the compose step renders `gpus` into model.gpus, so that key is not settable in `values`.",
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "gpus"
-          ],
+          "required": ["gpus"],
           "properties": {
             "gpus": {
               "description": "GPUs per pod. For a multi-node variant this is per pod, not per group -- total is gpus x nodes.",
@@ -142,10 +118,7 @@
               "default": 1
             },
             "topology": {
-              "enum": [
-                "single-node",
-                "lws"
-              ],
+              "enum": ["single-node", "lws"],
               "default": "single-node"
             },
             "gpuProduct": {
@@ -168,13 +141,7 @@
             },
             "vendor": {
               "description": "Accelerator brand this variant is built for. Decides the extended resource the pod requests and the node label its product is published under -- nvidia.com/gpu and nvidia.com/gpu.product, huawei.com/Ascend910 and its own label, and so on. Singular on purpose: a CANN build of an engine is a different image with different flags than a CUDA build, so a model that runs on both publishes two variants rather than one variant claiming both.",
-              "enum": [
-                "nvidia",
-                "ascend",
-                "cambricon",
-                "hygon",
-                "amd"
-              ],
+              "enum": ["nvidia", "ascend", "cambricon", "hygon", "amd"],
               "default": "nvidia"
             }
           },
@@ -186,14 +153,10 @@
                     "const": "lws"
                   }
                 },
-                "required": [
-                  "topology"
-                ]
+                "required": ["topology"]
               },
               "then": {
-                "required": [
-                  "nodes"
-                ],
+                "required": ["nodes"],
                 "properties": {
                   "nodes": {
                     "minimum": 2

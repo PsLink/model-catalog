@@ -5,11 +5,7 @@
   "description": "models/<name>/metadata.yaml: the cosmetic half of a model, shared by every version. Nothing here decides what a deploy renders, which is why it may be edited in place -- a description fixed today must not require republishing a version somebody has pinned. Anything that changes what gets deployed (servedName, source, variants) lives in the version file and is immutable.",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "apiVersion",
-    "name",
-    "source"
-  ],
+  "required": ["apiVersion", "name", "source"],
   "properties": {
     "apiVersion": {
       "const": "catalog.swiss/v1"
@@ -51,10 +47,7 @@
     },
     "deprecated": {
       "description": "Hidden from the marketplace by default; existing deploys still resolve. A string is shown as the reason.",
-      "type": [
-        "boolean",
-        "string"
-      ]
+      "type": ["boolean", "string"]
     },
     "tuning": {
       "description": "Measured tuning results: a tuned variant against a baseline, both in one published version, on the tuning benchmark. Display only -- nothing composes from it -- so a re-measurement is an edit here, not a new version. hack/validate-schema.js checks that the version is published, that both ids are variants of it, and that the report sits beside this file.",
@@ -62,12 +55,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "version",
-          "baseline",
-          "optimized",
-          "report"
-        ],
+        "required": ["version", "baseline", "optimized", "report"],
         "properties": {
           "version": {
             "description": "The published version both variants belong to.",
@@ -95,10 +83,7 @@
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "required": [
-                "name",
-                "uplift"
-              ],
+              "required": ["name", "uplift"],
               "properties": {
                 "name": {
                   "description": "The workload, as the report names it, such as \"50k + 1.5k\" (input + output tokens).",
@@ -125,9 +110,7 @@
       "description": "Model identity, never a location. The chart mounts weights from model.localPath on the host, which is a fact about a cluster -- the site profile derives that path from `hf`, and preflight checks it exists. Shared by every version: a different repo id is a different model, not a new version of this one.",
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "hf"
-      ],
+      "required": ["hf"],
       "properties": {
         "hf": {
           "description": "Hugging Face repo id, org/name.",

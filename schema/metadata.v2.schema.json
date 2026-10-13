@@ -5,11 +5,7 @@
   "description": "models/<name>/metadata.yaml for a v2 model: what the model is, its default variant and tuning results. Edited in place.",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "apiVersion",
-    "name",
-    "source"
-  ],
+  "required": ["apiVersion", "name", "source"],
   "properties": {
     "apiVersion": {
       "const": "catalog.swiss/v2"
@@ -60,11 +56,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "baseline",
-          "optimized",
-          "report"
-        ],
+        "required": ["baseline", "optimized", "report"],
         "properties": {
           "version": {
             "description": "Legacy: the v1 version measured, for index.json.",

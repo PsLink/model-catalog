@@ -5,9 +5,7 @@
   "description": "catalog.yaml: settings for the catalog as a whole, published in index.json.",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "apiVersion"
-  ],
+  "required": ["apiVersion"],
   "properties": {
     "apiVersion": {
       "const": "catalog.swiss/v1"

@@ -5,16 +5,7 @@
   "description": "models/<model>/<id>.yaml: one variant of a model, edited in place, its version raised on every change. Site-specific and per-deploy settings are rejected, as in v1.",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "apiVersion",
-    "kind",
-    "model",
-    "id",
-    "version",
-    "engine",
-    "chart",
-    "requires"
-  ],
+  "required": ["apiVersion", "kind", "model", "id", "version", "engine", "chart", "requires"],
   "properties": {
     "apiVersion": {
       "const": "catalog.swiss/v2"
@@ -62,10 +53,7 @@
     },
     "deprecated": {
       "description": "Deprecate before deleting the file. A string is the reason.",
-      "type": [
-        "boolean",
-        "string"
-      ]
+      "type": ["boolean", "string"]
     },
     "replaces": {
       "description": "The id of a variant this one renames or supersedes.",
