@@ -20,30 +20,13 @@ the tuned variant's improvement over its baseline, the perf report behind it, an
 Filters live in the URL, so a view can be shared, e.g.
 [recipes on B300, fewest GPUs first](https://modelsphere.github.io/model-catalog/?hardware=B300&sort=gpus).
 
-**Use it with swiss.** The site is also the catalog swiss reads:
-
-```sh
-swiss catalog list --catalog https://modelsphere.github.io/model-catalog/
-```
-
-```yaml
-# swissd site profile
-catalogs:
-  - name: public
-    url: https://modelsphere.github.io/model-catalog/
-    default: true
-```
-
-To try this checkout instead, serve it locally with the catalog server (needs `npm install`):
-
-```sh
-npm run serve                                     # http://127.0.0.1:8000
-swiss plan --catalog http://127.0.0.1:8000 --model qwen3.6-35b-a3b   # also needs a site profile
-```
+ [swiss](https://github.com/modelsphere/swiss) deploys from this catalog, reading it at the site's address.
+ It is the deployment backend of [ModelSphere](https://github.com/modelsphere/modelsphere), with [Console](https://github.com/modelsphere/console) as its web portal;
+ see ModelSphere to get started.
 
 ## Add a model or variant
 
-One file per variant, edited in place ([#30](https://github.com/modelsphere/model-catalog/issues/30)).
+One file per variant, edited in place
 
 ```
 models/<name>/      named after metadata.yaml's name
