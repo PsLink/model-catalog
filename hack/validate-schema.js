@@ -1,6 +1,9 @@
 #!/usr/bin/env node
-// Schema-check this catalog, and what changed since --base REF (CI passes the
-// pull request's base), else since HEAD: the uncommitted edits.
+// Schema-check every file in this catalog as it stands. On top, the version
+// raise rule: without --base, over every variant file's whole history; with
+// --base REF (CI passes the pull request's base, the pre-commit hook HEAD),
+// only what changed since the merge-base with REF. --skip-version-bump leaves
+// that rule out.
 "use strict";
 
 const fs = require("fs");
@@ -25,8 +28,8 @@ const { reportProblem } = require("./lib/report");
 const { paint, marks, plural } = require("./lib/style");
 
 const {
-  values: { base },
-} = parseArgs({ options: { base: { type: "string" } } });
+  values: { base, "skip-version-bump": skipVersionBump },
+} = parseArgs({ options: { base: { type: "string" }, "skip-version-bump": { type: "boolean" } } });
 
 function pointer(instancePath) {
   if (!instancePath) return "";
@@ -87,18 +90,20 @@ function fail(rel, lines) {
   problems.set(rel, [...(problems.get(rel) ?? []), ...lines]);
 }
 
-// One base for every check on changes: --base, else HEAD. Nothing is guessed.
-const baseKey = base ? `--base ${base}` : "HEAD";
+// --base: the commit every check on changes starts from.
+const baseKey = `--base ${base}`;
 let since;
-try {
-  since = git(["merge-base", base ?? "HEAD", "HEAD"]).trim();
-} catch (err) {
-  fail(baseKey, [err.message]);
+if (base) {
+  try {
+    since = git(["merge-base", base, "HEAD"]).trim();
+  } catch (err) {
+    fail(baseKey, [err.message]);
+  }
 }
 console.log(
   paint(
     "bold",
-    `Schema validation: the whole catalog${since ? `, and changes since ${base ? `merge-base with ${base}` : "HEAD"} (${since.slice(0, 7)})` : ""}`,
+    `Schema validation: the whole catalog${base ? `, and changes since merge-base with ${base}${since ? ` (${since.slice(0, 7)})` : ""}` : skipVersionBump ? "" : ", every variant's history"}${skipVersionBump ? ", without the version raise rule" : ""}`,
   ),
 );
 
@@ -428,8 +433,9 @@ for (const name of modelNames()) {
   if (lines.length > 0) fail(path.relative(root, meta), lines);
 }
 
-// A variant file the branch changes raises its version, and changes more than that.
-if (since) {
+// A variant file's version goes up with every change, and only with one: every
+// change in its history, or, with --base, the branch's as one.
+if (!skipVersionBump && (!base || since)) {
   try {
     for (const [rel, line] of revisionProblems({ since })) fail(rel, [line]);
   } catch (err) {

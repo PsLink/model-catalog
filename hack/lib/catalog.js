@@ -253,16 +253,18 @@ function historiesOf({ root: base = root } = {}) {
   return new Map([...variantRevisions(fileHistory(base).files, base)].map(([rel, h]) => [rel, historyDoc(rel, h)]));
 }
 
-// A variant file changed since a commit -- validate:schema's --base, else HEAD
-// -- raises its version, and changes more than that. Commits in between are one
-// change, as a pull request is once merged.
-function revisionProblems({ root: dir = root, since }) {
+// Each change to a variant file raises its version, and changes more than
+// that. Without since, every change in its history, the working copy's
+// included; with since -- validate:schema's --base -- only what changed since
+// that commit, the commits in between one change, as a pull request is once
+// merged.
+function revisionProblems({ root: dir = root, since } = {}) {
+  if (since == null) return historyProblems(dir);
   const git = (args) => {
     const r = spawnSync("git", args, { cwd: dir, maxBuffer: 1 << 28 });
     if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${String(r.stderr || r.error?.message || "").trim()}`);
     return r.stdout;
   };
-  const strip = ({ version, ...rest }) => rest;
   const out = [];
   // Modified only: a new file has no version to raise, a deleted one nothing to check.
   const changed = git(["diff", "--name-only", "--no-renames", "--diff-filter=M", "-z", since, "--", "models"])
@@ -273,13 +275,32 @@ function revisionProblems({ root: dir = root, since }) {
     const now = parseOrNull(fs.readFileSync(path.join(dir, rel)));
     const was = parseOrNull(git(["show", `${since}:${rel}`]));
     if (kindOf(now) !== "variant" || kindOf(was) !== "variant") continue;
-    if (!(compareVersions(String(now.version), String(was.version)) > 0)) {
-      out.push([rel, `changed without raising version above ${was.version}`]);
-    } else if (isDeepStrictEqual(strip(now), strip(was))) {
-      out.push([rel, `version ${now.version} changes nothing else`]);
-    }
+    const problem = versionProblem(now, was);
+    if (problem) out.push([rel, problem]);
   }
   return out;
+}
+
+function historyProblems(base) {
+  const out = [];
+  for (const [rel, { revisions }] of variantRevisions(fileHistory(base).files, base)) {
+    revisions.forEach((r, i) => {
+      const prev = revisions[i - 1];
+      if (!prev) return;
+      const at = r.commit ? r.commit.slice(0, 7) : "working copy";
+      const problem = versionProblem(r.doc, prev.doc);
+      if (problem) out.push([rel, `${at}: ${problem}`]);
+    });
+  }
+  return out;
+}
+
+// What is wrong with now, a variant file's next revision after was; null when nothing.
+function versionProblem(now, was) {
+  const strip = ({ version, ...rest }) => rest;
+  if (!(compareVersions(String(now.version), String(was.version)) > 0)) return `changed without raising version above ${was.version}`;
+  if (isDeepStrictEqual(strip(now), strip(was))) return `version ${now.version} changes nothing else`;
+  return null;
 }
 
 function parseOrNull(bytes) {

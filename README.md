@@ -142,7 +142,7 @@ linking it. The images it records must be the two variants' own (registry, repos
 
 | command | does |
 | --- | --- |
-| `npm run validate:schema` | schemas, naming and layout, version raises, tuning references, report HTML (pre-commit and CI) |
+| `npm run validate:schema` | schemas, naming and layout, version raises, tuning references, report HTML (pre-commit and CI)<br> without `--base`, version raises over every variant's whole history; `--skip-version-bump` leaves them out |
 | `npm test` | every unit test: the catalog library, the Helm validator, the catalog server, and the site's types and tests (`npm run test:web` for the site alone) |
 | `npm run tools:install` | pinned Helm, kubeconform and crane, once |
 | `npm run validate:helm` | render every variant against the charts (`--chart-mode declared` for what a deploy uses) |
