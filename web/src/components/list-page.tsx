@@ -6,7 +6,8 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactElemen
 import { useSearchParams } from "react-router";
 import { ArrowDownIcon, ArrowDownWideNarrowIcon, ArrowUpDownIcon, ArrowUpIcon, ArrowUpNarrowWideIcon, XIcon } from "lucide-react";
 import { countBy, sortDir, sorter, type Dir, type Facet } from "@/lib/facets";
-import { gpuGroup, gpuHue } from "@/lib/hues";
+import { topologyLabel } from "@/lib/catalog";
+import { gpuGroup, gpuHue, topologyHue } from "@/lib/hues";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Toggle } from "@/components/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { ColumnFilter, FilterSelect, GpuToggles, Summary, type FilterOption } from "./catalog";
+import { ColumnFilter, FilterSelect, GpuToggles, Summary, TopologyToggles, type FilterOption } from "./catalog";
 import { icons } from "./icons";
 import { SiteFooter, SiteHeader } from "./site";
 
@@ -33,10 +34,11 @@ interface State {
   // Model names; anything of any of them matches.
   model: string[];
   hardware: string[];
+  topology: string[];
 }
 
 // The filters a table header can carry: many values each.
-type Multi = "model" | "hardware";
+type Multi = "model" | "hardware" | "topology";
 
 const DEFAULTS = { sort: "uplift", view: "table" };
 
@@ -44,7 +46,12 @@ const flip = (d: Dir): Dir => (d === "ascending" ? "descending" : "ascending");
 // In the URL, only when a sort runs against its usual direction.
 const DIR_PARAM: Record<Dir, string> = { ascending: "asc", descending: "desc" };
 
-export type SortHead = (col: string, label: string, opts?: { className?: string; title?: string; sub?: string; filter?: Multi }) => ReactElement;
+// col null: a header that only filters, with no sort of its own.
+export type SortHead = (
+  col: string | null,
+  label: string,
+  opts?: { className?: string; title?: string; sub?: string; filter?: Multi },
+) => ReactElement;
 
 export interface ListConfig {
   // The page's title, with what it is; heading sits above the summary.
@@ -54,7 +61,7 @@ export interface ListConfig {
   facets: Facet[];
   search: string;
   sorts: Array<[string, string]>;
-  // What a GPU toggle counts, for its tooltip.
+  // What a GPU or topology toggle counts, for its tooltip.
   gpuWhat: string;
   // The card grid's narrowest column.
   cardWidth: number;
@@ -72,6 +79,7 @@ function matches(m: Facet, st: State): boolean {
   if (st.family && m.family !== st.family) return false;
   if (st.engine && !m.engines.includes(st.engine)) return false;
   if (st.hardware.length && !st.hardware.some((h) => m.hardware.includes(h))) return false;
+  if (st.topology.length && !st.topology.some((t) => m.topology.includes(t))) return false;
   if (st.tag && !m.tags.includes(st.tag)) return false;
   if (st.hidedep && m.deprecated) return false;
   return true;
@@ -88,6 +96,7 @@ function queryOf(st: State): string {
   if (st.dir !== sortDir[st.sort]) params.set("dir", DIR_PARAM[st.dir]);
   for (const n of st.model) params.append("model", n);
   for (const h of st.hardware) params.append("hardware", h);
+  for (const t of st.topology) params.append("topology", t);
   return params.toString();
 }
 
@@ -105,6 +114,7 @@ export function ListPage({ cfg }: { cfg: ListConfig }) {
       tag: facets.flatMap((f) => f.tags),
       model: countBy(facets.map((f) => f.name)),
       hardware: countBy(facets.flatMap((f) => f.hardware)),
+      topology: countBy(facets.flatMap((f) => f.topology)),
     }),
     [facets],
   );
@@ -134,6 +144,7 @@ export function ListPage({ cfg }: { cfg: ListConfig }) {
       view: pick("view", ["cards", "table"], html.dataset.view === "cards" ? "cards" : "table") as View,
       model: params.getAll("model").filter((n) => n in options.model),
       hardware: params.getAll("hardware").filter((h) => h in options.hardware),
+      topology: params.getAll("topology").filter((t) => t in options.topology),
     };
   });
   const set = (patch: Partial<State>) => setSt((s) => ({ ...s, ...patch }));
@@ -196,10 +207,11 @@ export function ListPage({ cfg }: { cfg: ListConfig }) {
     if (sort) sortBy(sort.dataset.sort!);
   };
 
-  // What a header's filter offers: models by name, GPUs as the toolbar has them.
+  // What a header's filter offers: models by name, GPUs and topologies as the
+  // toolbar has them.
   const modelNames = useMemo(() => new Map(facets.map((f) => [f.name, f.displayName])), [facets]);
   const filterOptions = useMemo<Record<Multi, FilterOption[]>>(() => {
-    const { model, hardware } = options;
+    const { model, hardware, topology } = options;
     return {
       model: Object.keys(model)
         .map((n) => ({ value: n, label: modelNames.get(n)!, count: model[n] }))
@@ -207,13 +219,16 @@ export function ListPage({ cfg }: { cfg: ListConfig }) {
       hardware: Object.keys(hardware)
         .sort((a, b) => gpuGroup(a) - gpuGroup(b) || hardware[b] - hardware[a] || a.localeCompare(b))
         .map((h) => ({ value: h, label: h, count: hardware[h], hue: gpuHue(h) })),
+      topology: Object.keys(topology)
+        .sort((a, b) => topology[b] - topology[a] || a.localeCompare(b))
+        .map((t) => ({ value: t, label: topologyLabel(t), count: topology[t], hue: topologyHue(t) })),
     };
   }, [options, modelNames]);
 
   // A sortable header: its name, then the sort's arrow. With a filter, the
-  // name opens it, and only the arrow sorts.
+  // name opens it, and only the arrow sorts; with no sort, there is no arrow.
   const th: SortHead = (col, label, { className, title, sub, filter } = {}) => {
-    const dir = col === st.sort ? st.dir : undefined;
+    const dir = col != null && col === st.sort ? st.dir : undefined;
     return (
       <TableHead aria-sort={dir} className={className} title={title}>
         <span className="inline-flex items-center gap-[0.2rem]">
@@ -230,16 +245,21 @@ export function ListPage({ cfg }: { cfg: ListConfig }) {
               {label}
             </Button>
           )}
-          <Button
-            variant="bare"
-            size="none"
-            data-sort={col}
-            aria-label={`Sort by ${label.toLowerCase()}${dir ? `, ${dir}` : ""}`}
-            title={dir ? `Sorted ${dir}: click for ${flip(dir)}` : `Sort by ${label.toLowerCase()}`}
-            className={cn("rounded-sm p-[0.2rem] text-faint hover:bg-accent hover:text-foreground [&_svg]:size-[0.85rem]", dir && "text-foreground")}
-          >
-            {dir === "ascending" ? <ArrowUpIcon /> : dir === "descending" ? <ArrowDownIcon /> : <ArrowUpDownIcon />}
-          </Button>
+          {col != null && (
+            <Button
+              variant="bare"
+              size="none"
+              data-sort={col}
+              aria-label={`Sort by ${label.toLowerCase()}${dir ? `, ${dir}` : ""}`}
+              title={dir ? `Sorted ${dir}: click for ${flip(dir)}` : `Sort by ${label.toLowerCase()}`}
+              className={cn(
+                "rounded-sm p-[0.2rem] text-faint hover:bg-accent hover:text-foreground [&_svg]:size-[0.85rem]",
+                dir && "text-foreground",
+              )}
+            >
+              {dir === "ascending" ? <ArrowUpIcon /> : dir === "descending" ? <ArrowDownIcon /> : <ArrowUpDownIcon />}
+            </Button>
+          )}
         </span>
         {sub && <span className="mt-[0.1rem] block text-[0.68rem] font-normal text-faint">{sub}</span>}
       </TableHead>
@@ -386,12 +406,20 @@ export function ListPage({ cfg }: { cfg: ListConfig }) {
                   dir: sortDir[DEFAULTS.sort],
                   model: [],
                   hardware: [],
+                  topology: [],
                 })
               }
             >
               Reset
             </Button>
           </div>
+          {/* Topology on a line of its own, under the GPUs; only while there is
+              a choice: every entry on one topology leaves nothing to filter. */}
+          {Object.keys(options.topology).length > 1 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <TopologyToggles counts={options.topology} what={cfg.gpuWhat} selected={st.topology} onChange={(topology) => set({ topology })} />
+            </div>
+          )}
         </form>
         <div onClick={onResultsClick}>
           {kept.current.has("cards") && (
