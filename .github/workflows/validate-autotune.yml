@@ -31,8 +31,8 @@ jobs:
           node-version: 24
       - name: Install trusted validator dependencies
         run: npm ci --ignore-scripts
-      - name: Test trusted validator
-        run: node --test hack/lib/autotune-validation.test.js
+      # Validator self-tests run in lint when implementation files change.
+      # This job validates PR data using trusted base-branch code only.
       - name: Fetch PR data without checking it out
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}

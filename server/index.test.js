@@ -23,7 +23,10 @@ test("index.json is the catalog swiss reads, and anyone may fetch it", async () 
   assert.equal(res.headers.get("access-control-allow-origin"), "*");
   const index = await res.json();
   assert.equal(index.apiVersion, "catalog.swiss/v1");
-  assert.equal(index.count, modelNames().length);
+  // Pure v2 models have no legacy version files and do not belong in index.json.
+  const legacyModels = modelNames().filter((name) => versionFiles(name).length > 0);
+  assert.equal(index.count, legacyModels.length);
+  assert.deepEqual(index.models.map((model) => model.name).sort(), legacyModels.sort());
 });
 
 test("every version file the index names is served at its path, as it is", async () => {

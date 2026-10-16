@@ -27,8 +27,24 @@ jobs:
       - name: Validate model schemas
         run: npm run validate:schema -- --base ${{ github.event.pull_request.base.sha }}
 
-      # The catalog library, the Helm validator, the catalog server and the site.
+      - name: Detect implementation changes
+        id: changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          node <<'NODE'
+          const { execFileSync } = require('node:child_process');
+          const { appendFileSync } = require('node:fs');
+          const files = execFileSync('git', ['diff', '--no-renames', '--name-only', '-z', process.env.BASE_SHA, process.env.HEAD_SHA], { encoding: 'utf8' }).split('\0').filter(Boolean);
+          const implementation = files.some(file => !file.startsWith('models/') && file !== 'catalog.yaml');
+          appendFileSync(process.env.GITHUB_OUTPUT, `implementation=${implementation}\n`);
+          NODE
+
+      # Includes AutoTune validator self-tests. Model-only PRs use the schema,
+      # Helm, image and original-track checks instead of development fixtures.
       - name: Test
+        if: steps.changes.outputs.implementation == 'true'
         run: npm test
 
       - name: Install pinned Helm, kubeconform and crane

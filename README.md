@@ -51,6 +51,15 @@ Swiss/Helm deployment. `source_run_id` is recorded for traceability, not verifie
 against the original run. Run the local regression tests with
 `node --test hack/lib/autotune-validation.test.js`.
 
+Original-track validation reads model data from the PR and does not run the
+validator's development self-tests. The lint workflow runs `npm test` when any
+file outside `models/` and `catalog.yaml` changes, including validator code,
+schemas, dependencies, fixtures, or workflows. Model-only PRs still run schema,
+Helm, image, and original-track validation. The fixed export under
+`hack/fixtures/autotune/modelforge/` is test data only; model contributors do not
+need to provide or update it. Changes to the trusted replay workflow or validator
+must reach the base branch before they can affect model PR validation.
+
 ## Add a model or variant
 
 One file per variant, edited in place
