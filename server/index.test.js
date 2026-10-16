@@ -23,7 +23,7 @@ test("index.json is the catalog swiss reads, and anyone may fetch it", async () 
   assert.equal(res.headers.get("access-control-allow-origin"), "*");
   const index = await res.json();
   assert.equal(index.apiVersion, "catalog.swiss/v1");
-  assert.equal(index.count, modelNames().length);
+  assert.equal(index.count, modelNames().filter((n) => versionFiles(n).length > 0).length);
 });
 
 test("every version file the index names is served at its path, as it is", async () => {
