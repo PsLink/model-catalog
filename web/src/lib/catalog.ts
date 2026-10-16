@@ -46,10 +46,14 @@ export function topologyLabel(topology: string): string {
   return TOPOLOGY_LABELS[topology] || topology;
 }
 
+// pd: prefill and decode may each need a different number of GPUs, so
+// requires.gpus is no count to show; only the card is.
+export const showsGpuCount = (req: Requires) => req.topology !== "pd";
+
 // The topology goes unsaid: every view shows it on its own (see Topology).
 function requiresSummary(req: Requires | null): string {
   if (!req) return "";
-  let gpus = req.gpus != null ? `${req.gpus} GPU` + (req.gpus === 1 ? "" : "s") : null;
+  let gpus = req.gpus === 0 ? "NO-GPU" : req.gpus != null && showsGpuCount(req) ? `${req.gpus} GPU` + (req.gpus === 1 ? "" : "s") : null;
   // requires.gpus is per pod; a multi-node group needs gpus x nodes in total.
   if (gpus && req.nodes && req.nodes > 1) gpus += ` × ${req.nodes} nodes`;
   const product = Array.isArray(req.gpuProduct) ? req.gpuProduct.join(", ") : null;
@@ -65,9 +69,10 @@ const vendorName = (vendor: string) => VENDOR_NAMES[vendor] || vendor;
 // Short labels for the hardware filter: NVIDIA-H100-80GB-HBM3 -> H100,
 // NVIDIA-RTX-6000D -> RTX-6000D. NVIDIA cards go bare; another vendor's card
 // reads "<Vendor> <model>" (Ascend-910B3 -> Ascend 910B3), or stays as is when
-// it names the vendor elsewhere.
+// it names the vendor elsewhere. requires.gpus 0 is a CPU-only variant: "NO-GPU".
 export function hardwareLabels(req: Requires | null): string[] {
   if (!req) return [];
+  if (req.gpus === 0) return ["NO-GPU"];
   const vendor = req.vendor || "nvidia";
   const products = Array.isArray(req.gpuProduct) ? req.gpuProduct : [];
   if (products.length === 0) return [vendor === "nvidia" ? "any GPU" : vendorName(vendor)];
@@ -81,9 +86,12 @@ export function hardwareLabels(req: Requires | null): string[] {
   });
 }
 
-// Compact hardware line for a variant: "8 × H100", "8 × GPU × 2 nodes".
+// Compact hardware line for a variant: "8 × H100", "8 × GPU × 2 nodes", "NO-GPU",
+// and for pd the card alone: "RTX-6000D".
 export function hardwareShort(req: Requires | null): string {
   if (!req || req.gpus == null) return "";
+  if (req.gpus === 0) return "NO-GPU";
+  if (!showsGpuCount(req)) return hardwareLabels(req).join(" / ");
   const hasProducts = Array.isArray(req.gpuProduct) && req.gpuProduct.length > 0;
   const vendor = req.vendor && req.vendor !== "nvidia" ? vendorName(req.vendor) : "GPU";
   let s = `${req.gpus} × ${hasProducts ? hardwareLabels(req).join(" / ") : vendor}`;

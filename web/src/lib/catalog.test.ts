@@ -181,6 +181,16 @@ describe("index-v2.json", () => {
     expect(hardwareLabels({ gpus: 1, vendor: "ascend", gpuProduct: ["Ascend-910B3"] })).toEqual(["Ascend 910B3"]);
     expect(hardwareShort({ gpus: 1, vendor: "ascend" })).toBe("1 × Ascend");
   });
+
+  test("hardware labels: gpus 0 is CPU only", () => {
+    expect(hardwareLabels({ gpus: 0 })).toEqual(["NO-GPU"]);
+    expect(hardwareShort({ gpus: 0 })).toBe("NO-GPU");
+  });
+
+  test("hardware labels: pd shows the card, not a count", () => {
+    expect(hardwareShort({ gpus: 1, topology: "pd", gpuProduct: ["NVIDIA-RTX-6000D"] })).toBe("RTX-6000D");
+    expect(hardwareShort({ gpus: 1, topology: "pd" })).toBe("any GPU");
+  });
 });
 
 describe("facets", () => {
@@ -231,5 +241,10 @@ describe("facets", () => {
     const facet = variantFacetsOf(model([v], [pair("1.0.1", "fast", [12])]), v, 0);
     expect(facet).toMatchObject({ gpus: 16, uplift: 12, label: "m · fast", engines: ["sglang"] });
     expect(facet.text).toContain("org/sglang:v1");
+  });
+
+  test("a pd variant has no GPU count to sort by", () => {
+    const v = variant("pd", { requires: { gpus: 1, topology: "pd" } });
+    expect(variantFacetsOf(model([v], []), v, 0).gpus).toBeNull();
   });
 });
