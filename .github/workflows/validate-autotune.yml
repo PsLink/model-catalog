@@ -47,7 +47,8 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           GITHUB_TOKEN: ${{ github.token }}
           AUTOTUNE_API_URL: ${{ secrets.AUTOTUNE_API_URL }}
-          AUTOTUNE_API_KEY: ${{ secrets.AUTOTUNE_API_KEY }}
+          AUTOTUNE_USERNAME: ${{ secrets.AUTOTUNE_USERNAME }}
+          AUTOTUNE_PASSWORD: ${{ secrets.AUTOTUNE_PASSWORD }}
           AUTOTUNE_TIMEOUT_MINUTES: ${{ vars.AUTOTUNE_TIMEOUT_MINUTES || '240' }}
         run: node hack/validate-autotune.js
       - name: Mark infrastructure or cancellation failures on the exact PR commit

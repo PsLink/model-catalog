@@ -28,6 +28,8 @@ Filters live in the URL, so a view can be shared, e.g.
 
 The autotune PR workflow replays new optimized configurations against their
 Baseline Hub track. It supports both v1 version files and v2 variant files.
+See the [Chinese setup guide](docs/autotune-validation-setup.zh-CN.md) to
+configure the GitHub Environment, credentials, approvals and branch protection.
 For a v2 export, include `models/<model>/<model>.validation.json` beside the
 variant YAML files, using the exported `schema_version: 2` manifest. Each entry
 binds `variant_id`, `version`, `file`, `content_sha256`, `track_slug`,

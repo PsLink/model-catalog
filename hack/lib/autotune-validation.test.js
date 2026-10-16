@@ -284,7 +284,8 @@ test("CI uses existing track endpoints, polls verdict and reuses matching submis
       PR_NUMBER: "3",
       GITHUB_RUN_ID: "4",
       GITHUB_TOKEN: "github-test",
-      AUTOTUNE_API_KEY: "service-test",
+      AUTOTUNE_USERNAME: "ci-user",
+      AUTOTUNE_PASSWORD: "ci-pass",
       AUTOTUNE_API_URL: "https://autotune.test/api",
     };
     const statuses = [],
@@ -299,12 +300,18 @@ test("CI uses existing track endpoints, polls verdict and reuses matching submis
       const p = new URL(url).pathname,
         body = options.body && JSON.parse(options.body);
       let result;
-      if (p.endsWith(`/statuses/${head}`)) {
+      if (p.endsWith("/auth/login")) {
+        assert.equal(options.method, "POST");
+        assert.deepEqual(body, { username: "ci-user", password: "ci-pass" });
+        assert.equal(options.headers.Authorization, undefined);
+        result = { access_token: "issued-service-token" };
+      } else if (p.endsWith(`/statuses/${head}`)) {
         statuses.push(body.state);
         result = {};
       } else if (p.endsWith("/pulls/3")) result = { state: closed ? "closed" : "open", head: { sha: head } };
       else {
-        assert.equal(options.headers["X-API-Key"], "service-test");
+        assert.equal(options.headers.Authorization, "Bearer issued-service-token");
+        assert.equal(options.headers["X-API-Key"], undefined);
         if (p.endsWith("/tracks/demo-h100"))
           result = {
             ...track(convert(item())),
@@ -390,7 +397,8 @@ test("v2 export flows from Git blobs through main and reports the measurement ru
       PR_NUMBER: "3",
       GITHUB_RUN_ID: "4",
       GITHUB_TOKEN: "github-test",
-      AUTOTUNE_API_KEY: "service-test",
+      AUTOTUNE_USERNAME: "ci-user",
+      AUTOTUNE_PASSWORD: "ci-pass",
       AUTOTUNE_API_URL: "https://autotune.test/api",
     };
     const statuses = [],
@@ -399,7 +407,18 @@ test("v2 export flows from Git blobs through main and reports the measurement ru
     await main(env, async (url, options) => {
       const p = new URL(url).pathname;
       let body;
-      if (p.endsWith("/statuses/" + formatted)) {
+      if (p.endsWith("/auth/login")) {
+        assert.equal(options.method, "POST");
+        assert.deepEqual(JSON.parse(options.body), { username: "ci-user", password: "ci-pass" });
+        assert.equal(options.headers.Authorization, undefined);
+        body = { access_token: "issued-service-token" };
+      } else if (new URL(url).host === "autotune.test") {
+        assert.equal(options.headers.Authorization, "Bearer issued-service-token");
+        assert.equal(options.headers["X-API-Key"], undefined);
+      }
+      if (p.endsWith("/auth/login")) {
+        // Login has no existing bearer token.
+      } else if (p.endsWith("/statuses/" + formatted)) {
         statuses.push(JSON.parse(options.body).state);
         body = {};
       } else if (p.endsWith("/pulls/3")) body = { state: "open", head: { sha: formatted } };
@@ -472,14 +491,25 @@ test("polling retries transient errors, enforces the deadline, and records final
         GITHUB_RUN_ID: "4",
         GITHUB_RUN_ATTEMPT: String(attempt),
         GITHUB_TOKEN: "github-test",
-        AUTOTUNE_API_KEY: "service-test",
+        AUTOTUNE_USERNAME: "ci-user",
+        AUTOTUNE_PASSWORD: "ci-pass",
         AUTOTUNE_API_URL: "https://autotune.test/api",
         AUTOTUNE_TIMEOUT_MINUTES: "1",
       };
       const fetcher = async (url, options) => {
         const p = new URL(url).pathname;
         let result;
-        if (p.endsWith(`/statuses/${head}`)) {
+        if (p.endsWith("/auth/login")) {
+          assert.deepEqual(JSON.parse(options.body), { username: "ci-user", password: "ci-pass" });
+          assert.equal(options.headers.Authorization, undefined);
+          result = { access_token: "issued-service-token" };
+        } else if (new URL(url).host === "autotune.test") {
+          assert.equal(options.headers.Authorization, "Bearer issued-service-token");
+          assert.equal(options.headers["X-API-Key"], undefined);
+        }
+        if (p.endsWith("/auth/login")) {
+          // Login has no existing bearer token.
+        } else if (p.endsWith(`/statuses/${head}`)) {
           states.push(JSON.parse(options.body).state);
           result = {};
         } else if (p.endsWith("/pulls/3")) result = { state: "open", head: { sha: head } };

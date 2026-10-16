@@ -92,7 +92,13 @@ async function main(env = process.env, fetcher = fetch) {
     if (items.length) {
       const apiBase = required("AUTOTUNE_API_URL").replace(/\/$/, "");
       check(/^https?:\/\//.test(apiBase), "AUTOTUNE_API_URL must be an HTTP(S) URL ending in /api");
-      api = (path, method, body) => request(`${apiBase}/baseline-hub${path}`, { "X-API-Key": required("AUTOTUNE_API_KEY") }, method, body);
+      const login = await request(`${apiBase}/auth/login`, {}, "POST", {
+        username: required("AUTOTUNE_USERNAME"),
+        password: required("AUTOTUNE_PASSWORD"),
+      });
+      check(typeof login?.access_token === "string" && login.access_token.length > 0, "AutoTune login response is missing access_token");
+      const token = login.access_token;
+      api = (path, method, body) => request(`${apiBase}/baseline-hub${path}`, { Authorization: `Bearer ${token}` }, method, body);
       const prefix = `catalog-ci:${repo}:pr:${pr}:`;
       const attempt = env.GITHUB_RUN_ATTEMPT || "1";
       const limit = Number(env.AUTOTUNE_TIMEOUT_MINUTES || 240);
