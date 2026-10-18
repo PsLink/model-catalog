@@ -12,8 +12,10 @@ const sha = (s) => "sha256:" + crypto.createHash("sha256").update(s).digest("hex
 let repo;
 let s;
 beforeEach(async () => {
-  repo = catalogRepo([["2026-10-01T10:00:00Z", "init", catalogFiles]]);
-  s = await serve({ dir: repo.dir, publicUrl: PUBLIC });
+  // Served, its catalog.yaml says, at PUBLIC: old revisions at its raw/.
+  const settings = { ...catalogFiles["catalog.yaml"], site: PUBLIC, raw: `${PUBLIC}raw/` };
+  repo = catalogRepo([["2026-10-01T10:00:00Z", "init", { ...catalogFiles, "catalog.yaml": settings }]]);
+  s = await serve({ dir: repo.dir });
 });
 afterEach(() => {
   s.close();
@@ -237,5 +239,86 @@ test("the server says it takes writes, and how", async () => {
     assert.equal((await closed.json("api/v2/")).body.write, false);
   } finally {
     closed.close();
+  }
+});
+
+test("catalog.yaml is read at its digest, and replaced there: the index follows it at once", async () => {
+  const res = await s.fetch("api/v2/catalog", { auth: null });
+  const text = await res.text();
+  assert.match(text, /^site: https:\/\/catalog\.example\.com\/$/m);
+  const moved = text
+    .replace(/^site: .*$/m, "site: https://catalog.internal.example/")
+    .replace(/^raw: .*$/m, "raw: https://catalog.internal.example/raw/");
+
+  assert.equal((await put("api/v2/catalog", moved)).status, 428);
+  assert.equal((await put("api/v2/catalog", moved, { "If-Match": `"${sha("other")}"` })).status, 412);
+  const dry = await put("api/v2/catalog?dryRun=true", moved, { "If-Match": res.headers.get("etag") });
+  assert.deepEqual([dry.status, dry.body.commit, dry.body.site], [200, null, "https://catalog.internal.example/"]);
+  assert.equal((await s.json("index-v2.json")).body.site, PUBLIC, "a dry run moves nothing");
+
+  const done = await put("api/v2/catalog?message=catalog%3A+moved", moved, { "If-Match": res.headers.get("etag") });
+  assert.equal(done.status, 200);
+  assert.equal(done.body.commit, repo.head());
+  assert.match(repo.show(done.body.commit), /^Ada Lovelace <ada@example\.com>\|catalog-server\|catalog: moved$/);
+  const index = (await s.json("index-v2.json")).body;
+  assert.deepEqual([index.site, index.raw], ["https://catalog.internal.example/", "https://catalog.internal.example/raw/"]);
+});
+
+test("catalog.yaml's settings are model-catalog's, each an http(s) URL with no credentials in it", async () => {
+  const etag = (await s.fetch("api/v2/catalog")).headers.get("etag");
+  const bad = await put(
+    "api/v2/catalog",
+    "apiVersion: catalog.swiss/v2\nsite: catalog.example.com\nraw: https://u:pw@catalog.example.com/raw/\nrepo: ssh://git@git.example.com/c\ntitle: x\n",
+    { "If-Match": etag },
+  );
+  assert.equal(bad.status, 422);
+  assert.deepEqual(
+    bad.body.problems.map((p) => p.split(":")[1].trim()),
+    ["apiVersion", "site", "raw", "repo", "title"],
+  );
+});
+
+test("plain http, and a slash or none, are fine: the index puts the slash each needs", async () => {
+  const etag = (await s.fetch("api/v2/catalog")).headers.get("etag");
+  const done = await put(
+    "api/v2/catalog",
+    "apiVersion: catalog.swiss/v1\nsite: http://127.0.0.1:8000\nraw: http://127.0.0.1:8000/raw\nrepo: http://127.0.0.1:8000/\n",
+    { "If-Match": etag },
+  );
+  assert.equal(done.status, 200);
+  const index = (await s.json("index-v2.json")).body;
+  assert.deepEqual([index.site, index.raw, index.repo], ["http://127.0.0.1:8000/", "http://127.0.0.1:8000/raw/", "http://127.0.0.1:8000"]);
+});
+
+test("a history's links are served: the commit that made a revision, and the file as it was there", async () => {
+  const before = await (await s.fetch("models/m2/sglang-tp4.yaml")).text();
+  const etag = (await s.fetch(tp4)).headers.get("etag");
+  const done = await put(tp4, YAML.stringify(variant("sglang-tp4", "1.0.1", 2)), { "If-Match": etag, "X-Commit-Message": "tp4: two GPUs" });
+  const { revisions } = await (await s.fetch("models/m2/sglang-tp4.history.json")).json();
+  assert.equal(revisions[0].commit, done.body.commit);
+
+  // <repo>/commit/<sha>, as the history dialog links it.
+  const commit = await s.fetch(`commit/${done.body.commit}`);
+  const text = await commit.text();
+  assert.match(commit.headers.get("content-type"), /^text\/plain/);
+  assert.match(commit.headers.get("cache-control"), /immutable/);
+  assert.match(text, /^Author:\s+Ada Lovelace <ada@example\.com>$/m);
+  assert.match(text, /^\s+tp4: two GPUs$/m);
+  assert.match(text, /^-version: 1\.0\.0$/m);
+  assert.match(text, /^\+version: 1\.0\.1$/m);
+  assert.equal((await s.fetch(`commit/${done.body.commit.slice(0, 7)}`)).status, 200, "a short one too");
+
+  // <repo>/blob/<commit>/<path>: the file at an older revision, byte for byte.
+  const old = await s.fetch(`blob/${revisions[1].commit}/models/m2/sglang-tp4.yaml`);
+  assert.equal(await old.text(), before);
+  assert.equal(sha(before), revisions[1].digest);
+
+  for (const p of [
+    `commit/${"0".repeat(40)}`,
+    `blob/${done.body.commit}/models/m2/nope.yaml`,
+    `blob/${done.body.commit}/../outside`,
+    "commit/HEAD",
+  ]) {
+    assert.equal((await s.fetch(p)).status, 404, p);
   }
 });

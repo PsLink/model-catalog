@@ -9,6 +9,10 @@
 //   GET    models/<name>/<report>.html         perf reports
 //   GET    raw/<commit>/models/<name>/<f>.yaml a file as committed: where
 //                                              swiss fetches an old revision
+//   GET    commit/<sha>                        a commit, as git show has it
+//   GET    blob/<commit>/<path>                a file as it was at a commit:
+//                                              with commit/, what a history
+//                                              links to, for repo: this server
 //
 //   GET    api/v2/models/<name>/variants/<id>  a variant file, its digest as ETag
 //   PUT    api/v2/models/<name>/variants/<id>  add it (If-None-Match: *) or
@@ -19,9 +23,12 @@
 //   POST   api/v2/models                       a new model: {metadata, variants}
 //   GET    api/v2/                             what this server takes: the web
 //                                              app turns editing on by it
+//   GET    api/v2/catalog                      catalog.yaml, its digest as ETag
+//   PUT    api/v2/catalog                      (If-Match: <digest>)
 //   GET    api/v2/init                         whether the catalog is initialized
 //   POST   api/v2/init                         initialize it: commit the
-//                                              template's files ({"repo": url})
+//                                              template's files ({"site": url,
+//                                              "repo": url})
 //
 //   GET    /healthz                            at the server's root
 //
@@ -34,7 +41,18 @@ const crypto = require("crypto");
 const fs = require("fs");
 const http = require("http");
 const path = require("path");
-const { HttpError, initialized, initialize, putVariant, deleteVariant, putMetadata, createModel, tag } = require("./writes");
+const {
+  HttpError,
+  initialized,
+  initialize,
+  putSettings,
+  settingsProblems,
+  putVariant,
+  deleteVariant,
+  putMetadata,
+  createModel,
+  tag,
+} = require("./writes");
 const { templateFiles, BUILT_IN } = require("./template");
 const { digest } = require("./catalog");
 
@@ -158,6 +176,7 @@ function createServer({ store, tokens = null, base = "/", pages = null, template
         return json(200, { apiVersion: "catalog.swiss/v2", write: !!tokens, auth: "bearer" });
       }
       if (rel === "api/v2/init") return await serveInit(query);
+      if (rel === "api/v2/catalog") return await serveSettings(query);
       const api = /^api\/v2\/models(?:\/([^/]+)(?:\/(metadata|variants\/([^/]+)))?)?$/.exec(rel);
       if (api) return await serveApi(api, query);
       if (req.method !== "GET" && req.method !== "HEAD") return send(405, "text/plain; charset=utf-8", "GET only, but under api/v2/\n");
@@ -167,6 +186,20 @@ function createServer({ store, tokens = null, base = "/", pages = null, template
       if (/^models\/[^/]+\/[^/]+\.history\.json$/.test(rel)) {
         const body = snap.histories.get(rel);
         return body ? file(TYPES[".json"], body, snap.commit) : notFound();
+      }
+      // What a recipe's history links to, at a git host's paths (GitHub's), so
+      // a catalog whose repo is this server links to it: a commit, and a file
+      // as it was at one. Plain text, to be read; a full commit's is for good.
+      const commitPage = /^commit\/([0-9a-f]{7,64})$/.exec(rel);
+      if (commitPage) {
+        const text = store.repo.commitText(commitPage[1]);
+        const cache = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(commitPage[1]) ? "public, max-age=31536000, immutable" : "no-cache";
+        return text ? file("text/plain; charset=utf-8", text, null, cache) : notFound();
+      }
+      const blob = /^blob\/([0-9a-f]{40}|[0-9a-f]{64})\/(.+)$/.exec(rel);
+      if (blob) {
+        const body = store.repo.show(blob[1], blob[2]);
+        return body ? file("text/plain; charset=utf-8", body, null, "public, max-age=31536000, immutable") : notFound();
       }
       // A commit's file never changes, so it may be kept for good.
       const raw = /^raw\/([0-9a-f]{40}|[0-9a-f]{64})\/(models\/[^/]+\/[^/]+\.yaml)$/.exec(rel);
@@ -242,7 +275,8 @@ function createServer({ store, tokens = null, base = "/", pages = null, template
     }
 
     // An empty catalog is made one by committing the template's files to it:
-    // catalog.yaml, naming publicUrl as its site, and the repository given.
+    // catalog.yaml, naming where it is served (site, and its raw/) and its
+    // repository, as given.
     async function serveInit(q) {
       if (req.method === "GET" || req.method === "HEAD") {
         const snap = store.snapshot;
@@ -256,18 +290,51 @@ function createServer({ store, tokens = null, base = "/", pages = null, template
       try {
         ask = text ? JSON.parse(text) : {};
       } catch {
-        throw new HttpError(400, 'want JSON {"repo": "<the repository\'s web URL>"}, or no body');
+        throw new HttpError(400, 'want JSON {"site": "<where it is served>", "repo": "<its repository\'s web URL>"}, or no body');
       }
-      const { repo = null } = ask ?? {};
-      if (repo != null && (typeof repo !== "string" || !/^https?:\/\/[^/@\s]+(\/\S*)?$/.test(repo))) {
-        throw new HttpError(422, "repo: want the repository's http(s) web URL, with no credentials in it", {
-          problems: [`repo: ${JSON.stringify(repo)}`],
-        });
-      }
-      const files = templateFiles(template, { site: store.publicUrl, repo: repo?.replace(/\/+$/, "") });
+      const { site = null, repo = null } = ask ?? {};
+      // Old revisions are fetched from this server's raw/, under the site.
+      const at = typeof site === "string" ? site.replace(/\/*$/, "/") : site;
+      const values = { site: at, raw: typeof at === "string" ? `${at}raw/` : null, repo: typeof repo === "string" ? repo.replace(/\/+$/, "") : repo };
+      // What it writes passes what a settings edit is held to.
+      const given = Object.fromEntries(Object.entries({ site: values.site, repo: values.repo }).filter(([, v]) => v != null));
+      const problems = settingsProblems("catalog.yaml", { apiVersion: "catalog.swiss/v1", ...given });
+      if (problems.length) throw new HttpError(422, "not a change this catalog takes", { problems });
+      const files = templateFiles(template, values);
       const dryRun = ["true", "1"].includes(q.get("dryRun"));
       const done = await store.write((s) => initialize(s, { files, message: messageOf(q) }), { author, dryRun });
       return json(201, { commit: done.commit, ...(dryRun && { dryRun: true }), initialized: !dryRun, files: [...done.plan.changes.keys()] });
+    }
+
+    // catalog.yaml: where the catalog is served, and its repository.
+    async function serveSettings(q) {
+      const snap = store.snapshot;
+      if (req.method === "GET" || req.method === "HEAD") {
+        const oid = snap.tree.get("catalog.yaml");
+        if (!oid) return notFound();
+        const body = snap.blob(oid);
+        return file(TYPES[".yaml"], body, digest(body));
+      }
+      if (req.method !== "PUT") return send(405, "text/plain; charset=utf-8", "GET or PUT\n");
+      const author = authorOf();
+      if (!author) return unauthorized();
+      const ask = { body: await readBody(req), ifMatch: req.headers["if-match"], message: messageOf(q) };
+      const dryRun = ["true", "1"].includes(q.get("dryRun"));
+      const done = await store.write((s) => putSettings(s, ask), { author, dryRun });
+      const { site, raw, repo } = done.snapshot.index;
+      const oid = done.snapshot.tree.get("catalog.yaml");
+      const d = oid && digest(done.snapshot.blob(oid));
+      const out = {
+        commit: done.commit,
+        ...(dryRun && { dryRun: true }),
+        ...(done.plan.unchanged && { unchanged: true }),
+        path: "catalog.yaml",
+        digest: d,
+        site,
+        raw,
+        repo,
+      };
+      return json(200, out, d ? { ETag: `"${d}"` } : {});
     }
 
     // Who the request's token names; null when none does.
