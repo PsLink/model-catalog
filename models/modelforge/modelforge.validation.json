@@ -1,0 +1,24 @@
+{
+  "schema_version": 2,
+  "model": "modelforge",
+  "variants": [
+    {
+      "variant_id": "sglang-tp2-h800-baseline",
+      "version": "1.0.0",
+      "track_slug": "modelforge-h800-v2",
+      "source_run_id": 75,
+      "role": "baseline",
+      "file": "sglang-tp2-h800-baseline.yaml",
+      "content_sha256": "abf44cbfbbace2d091b0b5f3fd9abfac967533fc619d5fa8854a2d175a263154"
+    },
+    {
+      "variant_id": "sglang-tp2-h800-optimized",
+      "version": "1.0.0",
+      "track_slug": "modelforge-h800-v2",
+      "source_run_id": 81,
+      "role": "optimized",
+      "file": "sglang-tp2-h800-optimized.yaml",
+      "content_sha256": "d0438bb1998a694771512cc80951002ca917c79f73252b9e99a62fb22f748c9d"
+    }
+  ]
+}
