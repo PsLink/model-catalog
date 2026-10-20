@@ -1,6 +1,7 @@
 {
   "name": "catalog-server",
   "version": "0.1.0",
+  "license": "Apache-2.0",
   "description": "A schema v2 swiss model catalog, served from its git repository and written to over HTTP: every write is a commit.",
   "main": "src/main.js",
   "bin": {

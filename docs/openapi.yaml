@@ -1,0 +1,1510 @@
+openapi: 3.1.0
+info:
+  title: Swiss model catalog
+  version: "2"
+  description: |
+    The HTTP surface of the two catalog servers in this repository.
+
+    | server | source | serves | writes |
+    | --- | --- | --- | --- |
+    | `server/` | `npm run serve`, `npm run dev:site` | this checkout's `models/`, live; the GitHub Pages site is a static snapshot of the same reads | none |
+    | `catalog-server/` | `npm --prefix catalog-server start`, the image, the chart | a catalog's git repository, at its branch's tip (schema v2 only) | `api/v2/`, each write a commit, with a bearer token |
+
+    **Common reads** (tag *Catalog*) are at the paths the published site has them, so swiss and the web
+    app read either server the same way. Beyond those, `server/` adds the v1 `index.json`, and
+    catalog-server adds old revisions (`raw/`, `commit/`, `blob/`), `/healthz` and the `api/v2/` write API.
+    Each operation's `x-served-by` names the servers that have it.
+
+    Every `GET` also takes `HEAD`. Both servers answer any origin (`Access-Control-Allow-Origin: *`);
+    catalog-server also answers CORS preflights (`OPTIONS`) and exposes `ETag`. catalog-server serves
+    everything under its `basePath` (`/` by default) except `/healthz`; with `pagesDir` set it serves the
+    web app there too (not described here).
+
+    The differences in the common reads:
+
+    | | `server/` | catalog-server |
+    | --- | --- | --- |
+    | YAML content type | `text/yaml` | `application/yaml` |
+    | `Cache-Control` | `no-store` | `no-cache`; `immutable` for content at a full commit sha |
+    | `ETag`, `If-None-Match` → `304` | no | yes: the commit for `index-v2.json` and histories, the file's digest otherwise |
+    | YAML under `models/<name>/` | any file: variant files, v1 version files, `metadata.yaml` | v2 variant files only |
+    | errors | `text/plain` | `text/plain` for a `404`, JSON (`Error`) otherwise |
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+# Reads need no token; each write sets its own.
+security: []
+servers:
+  - url: http://127.0.0.1:8000
+    description: server/ (npm run serve) -- read-only
+  - url: https://modelsphere.github.io/model-catalog
+    description: The published site -- a static snapshot of server/'s reads
+  - url: "{origin}{basePath}"
+    description: catalog-server
+    variables:
+      origin:
+        default: http://127.0.0.1:8000
+      basePath:
+        default: ""
+        description: The config's basePath, without its trailing slash (e.g. /catalog).
+
+tags:
+  - name: Catalog
+    description: The catalog as the published site has it. Both servers.
+  - name: v1
+    description: The v1 catalog swiss reads. server/ only; catalog-server serves schema v2 alone.
+  - name: Revisions
+    description: |
+      Files and commits at a commit, from the repository. catalog-server only. A history's
+      `commit` and `digest` find a revision at `raw/<commit>/<path>`; `commit/` and `blob/` are at a
+      git host's (GitHub's) paths, so a catalog whose `repo` is this server links to them.
+
+      Clients never build these from the server's address: they follow the index's `raw` and `repo`
+      (see `IndexV2`). On server/ and the published site those name GitHub, which serves the
+      revisions; catalog-server's `raw` is its own `raw/`, and its `repo` may be itself.
+  - name: Service
+    description: What the server is and takes. catalog-server only.
+  - name: Variants
+    description: |
+      A model's variant files: `models/<model>/<id>.yaml`. catalog-server only. Reads need no token;
+      every write does, and must name the digest it read (`If-Match`).
+  - name: Models
+    description: A model's `metadata.yaml`, and new models. catalog-server only.
+  - name: Settings
+    description: "`catalog.yaml`: where the catalog is served (`site`, `raw`) and its repository (`repo`). catalog-server only."
+  - name: Setup
+    description: Initializing an empty catalog. catalog-server only.
+
+x-tagGroups:
+  - name: Reads -- both servers
+    tags: [Catalog]
+  - name: Reads -- server/ only
+    tags: [v1]
+  - name: Reads -- catalog-server only
+    tags: [Revisions, Service]
+  - name: Write API -- catalog-server (api/v2/)
+    tags: [Variants, Models, Settings, Setup]
+
+paths:
+  # ---- Common reads -------------------------------------------------------
+  /index-v2.json:
+    get:
+      tags: [Catalog]
+      operationId: getIndexV2
+      summary: The catalog
+      description: |
+        The v2 models and their variant files, without the variants' values. What the web app
+        renders from and swiss reads with `schemaVersion: v2`. Schema: `schema/index-v2.schema.json`.
+
+        server/ builds it from the checkout and git history, and again after an edit under
+        `models/` or a new commit; it answers `500` when the result fails its checks. catalog-server
+        builds it at each commit it serves.
+      x-served-by: [server, catalog-server]
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatchRead"
+      responses:
+        "200":
+          description: The index.
+          headers:
+            ETag:
+              $ref: "#/components/headers/CommitETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IndexV2"
+        "304":
+          $ref: "#/components/responses/NotModified"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  /models/{model}/{id}.history.json:
+    get:
+      tags: [Catalog]
+      operationId: getVariantHistory
+      summary: A variant's revisions
+      description: Every revision of a variant file, newest first, a deleted variant's included. Named by `variants[].history` in the index.
+      x-served-by: [server, catalog-server]
+      parameters:
+        - $ref: "#/components/parameters/Model"
+        - $ref: "#/components/parameters/VariantId"
+        - $ref: "#/components/parameters/IfNoneMatchRead"
+      responses:
+        "200":
+          description: The history.
+          headers:
+            ETag:
+              $ref: "#/components/headers/CommitETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/History"
+        "304":
+          $ref: "#/components/responses/NotModified"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /models/{model}/{file}.yaml:
+    get:
+      tags: [Catalog]
+      operationId: getModelFile
+      summary: A variant file
+      description: |
+        A file as the index names it (`variants[].path`), byte for byte: its sha256 is the index's
+        `digest`.
+
+        catalog-server serves v2 variant files alone. server/ serves any YAML file in the model's
+        directory: v1 version files (`<name>-<version>.yaml`, named by `index.json`) and
+        `metadata.yaml` too.
+      x-served-by: [server, catalog-server]
+      parameters:
+        - $ref: "#/components/parameters/Model"
+        - name: file
+          in: path
+          required: true
+          description: A variant's id; on server/, also a v1 version file's name, or `metadata`.
+          schema:
+            type: string
+        - $ref: "#/components/parameters/IfNoneMatchRead"
+      responses:
+        "200":
+          description: The file.
+          headers:
+            ETag:
+              $ref: "#/components/headers/DigestETag"
+          content:
+            application/yaml:
+              schema:
+                $ref: "#/components/schemas/Variant"
+            text/yaml:
+              schema:
+                $ref: "#/components/schemas/Variant"
+        "304":
+          $ref: "#/components/responses/NotModified"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /models/{model}/{report}.html:
+    get:
+      tags: [Catalog]
+      operationId: getReport
+      summary: A perf report
+      description: A report the index lists in a model's `reports`, and its `tuning[].report` names.
+      x-served-by: [server, catalog-server]
+      parameters:
+        - $ref: "#/components/parameters/Model"
+        - name: report
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/IfNoneMatchRead"
+      responses:
+        "200":
+          description: The report.
+          headers:
+            ETag:
+              $ref: "#/components/headers/DigestETag"
+          content:
+            text/html:
+              schema:
+                type: string
+        "304":
+          $ref: "#/components/responses/NotModified"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ---- server/ only -------------------------------------------------------
+  /index.json:
+    get:
+      tags: [v1]
+      operationId: getIndexV1
+      summary: The v1 catalog
+      description: |
+        Every model with a v1 version file, and those files (`versions[].path`, served at
+        `/models/{model}/{file}.yaml`). Built afresh on each request. swiss reads it with
+        `schemaVersion: v1`.
+      x-served-by: [server]
+      responses:
+        "200":
+          description: The index.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IndexV1"
+        "500":
+          $ref: "#/components/responses/ServerError"
+
+  # ---- catalog-server only: reads ------------------------------------------
+  /raw/{commit}/models/{model}/{file}.yaml:
+    get:
+      tags: [Revisions]
+      operationId: getRawFile
+      summary: A model file at a commit
+      description: |
+        Where swiss fetches an old revision: the index's `raw` is this path's prefix. Kept for good,
+        as a commit's file never changes -- a deleted variant's revisions too.
+      x-served-by: [catalog-server]
+      parameters:
+        - $ref: "#/components/parameters/FullCommit"
+        - $ref: "#/components/parameters/Model"
+        - name: file
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The file, as committed.
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/Immutable"
+          content:
+            application/yaml:
+              schema:
+                type: string
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /commit/{sha}:
+    get:
+      tags: [Revisions]
+      operationId: getCommit
+      summary: A commit
+      description: A commit as `git show` prints it -- author, message, diff. What a history's commit links to when `repo` is this server.
+      x-served-by: [catalog-server]
+      parameters:
+        - name: sha
+          in: path
+          required: true
+          description: A commit, or the start of one (7 hex digits or more). Only a full one is cached for good.
+          schema:
+            type: string
+            pattern: "^[0-9a-f]{7,64}$"
+      responses:
+        "200":
+          description: The commit.
+          content:
+            text/plain:
+              schema:
+                type: string
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /blob/{commit}/{path}:
+    get:
+      tags: [Revisions]
+      operationId: getBlob
+      summary: Any file at a commit
+      description: A file as it was at a commit, to be read. What a recipe's **Source** links to when `repo` is this server.
+      x-served-by: [catalog-server]
+      parameters:
+        - $ref: "#/components/parameters/FullCommit"
+        - name: path
+          in: path
+          required: true
+          description: The file's path in the repository; may contain `/`.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The file.
+          headers:
+            Cache-Control:
+              $ref: "#/components/headers/Immutable"
+          content:
+            text/plain:
+              schema:
+                type: string
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /healthz:
+    servers:
+      - url: "{origin}"
+        description: catalog-server, at its root whatever its basePath
+        variables:
+          origin:
+            default: http://127.0.0.1:8000
+    get:
+      tags: [Service]
+      operationId: getHealth
+      summary: Health
+      description: The commit served, the last sync's problem, and the files skipped as unparseable.
+      x-served-by: [catalog-server]
+      responses:
+        "200":
+          description: Serving a catalog -- perhaps an older one, when `problem` says the last sync failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        "503":
+          description: No catalog read yet.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+
+  /api/v2:
+    get:
+      tags: [Service]
+      operationId: getApi
+      summary: What this server takes
+      description: The web app turns editing on by this. A static host has nothing here, so to the app it is read-only. `/api/v2/` too, as the web app asks it.
+      x-served-by: [catalog-server]
+      responses:
+        "200":
+          description: The API.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Capabilities"
+
+  # ---- catalog-server only: the write API ---------------------------------
+  /api/v2/models/{model}/variants/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Model"
+      - $ref: "#/components/parameters/VariantId"
+    get:
+      tags: [Variants]
+      operationId: getVariant
+      summary: Read a variant file
+      description: The file at `models/{model}/{id}.yaml`, with the digest a write names in `If-Match`.
+      x-served-by: [catalog-server]
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatchRead"
+      responses:
+        "200":
+          description: The file.
+          headers:
+            ETag:
+              $ref: "#/components/headers/DigestETag"
+          content:
+            application/yaml:
+              schema:
+                $ref: "#/components/schemas/Variant"
+        "304":
+          $ref: "#/components/responses/NotModified"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Variants]
+      operationId: putVariant
+      summary: Add or replace a variant file
+      description: |
+        Adds the file (`If-None-Match: *`) or replaces it (`If-Match: <digest>`). The body is kept
+        byte for byte. It must be `catalog.swiss/v2` `kind: Variant`, its `model` and `id` this
+        path's, in a v2 model, and its `version` semver above the variant's last revision -- a deleted
+        one's included -- while changing more than the version. The same bytes again (a retry) are
+        `200` and commit nothing.
+
+        What is not checked: the variant's JSON schema, chart values, images (model-catalog's
+        `validate`).
+      x-served-by: [catalog-server]
+      security:
+        - bearer: []
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+        - $ref: "#/components/parameters/IfNoneMatchCreate"
+        - $ref: "#/components/parameters/DryRun"
+        - $ref: "#/components/parameters/Message"
+        - $ref: "#/components/parameters/CommitMessage"
+      requestBody:
+        required: true
+        content:
+          application/yaml:
+            schema:
+              $ref: "#/components/schemas/Variant"
+      responses:
+        "200":
+          $ref: "#/components/responses/Written"
+        "201":
+          $ref: "#/components/responses/Written"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WritesOff"
+        "404":
+          description: No such v2 model, or `id` is not a variant file's name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
+        "413":
+          $ref: "#/components/responses/TooLarge"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "428":
+          $ref: "#/components/responses/PreconditionRequired"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+    delete:
+      tags: [Variants]
+      operationId: deleteVariant
+      summary: Delete a variant file
+      description: |
+        Refused (`422`) while the model's `defaultVariant` or a `tuning` entry names it, or when it is
+        the model's last variant. Its history stays, and `raw/` keeps serving its revisions.
+      x-served-by: [catalog-server]
+      security:
+        - bearer: []
+      parameters:
+        - $ref: "#/components/parameters/IfMatchRequired"
+        - $ref: "#/components/parameters/DryRun"
+        - $ref: "#/components/parameters/Message"
+        - $ref: "#/components/parameters/CommitMessage"
+      responses:
+        "200":
+          $ref: "#/components/responses/Written"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WritesOff"
+        "404":
+          description: No such variant.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "428":
+          $ref: "#/components/responses/PreconditionRequired"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/v2/models/{model}/metadata:
+    parameters:
+      - $ref: "#/components/parameters/Model"
+    get:
+      tags: [Models]
+      operationId: getMetadata
+      summary: Read a model's metadata.yaml
+      x-served-by: [catalog-server]
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatchRead"
+      responses:
+        "200":
+          description: The file.
+          headers:
+            ETag:
+              $ref: "#/components/headers/DigestETag"
+          content:
+            application/yaml:
+              schema:
+                $ref: "#/components/schemas/Metadata"
+        "304":
+          $ref: "#/components/responses/NotModified"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Models]
+      operationId: putMetadata
+      summary: Replace a model's metadata.yaml
+      description: Its `apiVersion` must be `catalog.swiss/v2`, its `name` the model's directory, and its `defaultVariant`, when set, one of its variants.
+      x-served-by: [catalog-server]
+      security:
+        - bearer: []
+      parameters:
+        - $ref: "#/components/parameters/IfMatchRequired"
+        - $ref: "#/components/parameters/DryRun"
+        - $ref: "#/components/parameters/Message"
+        - $ref: "#/components/parameters/CommitMessage"
+      requestBody:
+        required: true
+        content:
+          application/yaml:
+            schema:
+              $ref: "#/components/schemas/Metadata"
+      responses:
+        "200":
+          $ref: "#/components/responses/Written"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WritesOff"
+        "404":
+          description: No such model.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
+        "413":
+          $ref: "#/components/responses/TooLarge"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "428":
+          $ref: "#/components/responses/PreconditionRequired"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/v2/models:
+    post:
+      tags: [Models]
+      operationId: createModel
+      summary: Add a model
+      description: A new model's `metadata.yaml` and its first variants, in one commit. Each is checked as its own write is.
+      x-served-by: [catalog-server]
+      security:
+        - bearer: []
+      parameters:
+        - $ref: "#/components/parameters/DryRun"
+        - $ref: "#/components/parameters/Message"
+        - $ref: "#/components/parameters/CommitMessage"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NewModel"
+      responses:
+        "201":
+          $ref: "#/components/responses/Written"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WritesOff"
+        "409":
+          description: The model exists, the catalog is not initialized, or it moved meanwhile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          $ref: "#/components/responses/TooLarge"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/v2/catalog:
+    get:
+      tags: [Settings]
+      operationId: getSettings
+      summary: Read catalog.yaml
+      x-served-by: [catalog-server]
+      parameters:
+        - $ref: "#/components/parameters/IfNoneMatchRead"
+      responses:
+        "200":
+          description: The file.
+          headers:
+            ETag:
+              $ref: "#/components/headers/DigestETag"
+          content:
+            application/yaml:
+              schema:
+                $ref: "#/components/schemas/CatalogSettings"
+        "304":
+          $ref: "#/components/responses/NotModified"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      tags: [Settings]
+      operationId: putSettings
+      summary: Replace catalog.yaml
+      description: |
+        `site`, `raw` and `repo`, each an http(s) URL with no credentials in it, a trailing slash or
+        none: the index puts the one each needs. The index follows at once.
+      x-served-by: [catalog-server]
+      security:
+        - bearer: []
+      parameters:
+        - $ref: "#/components/parameters/IfMatchRequired"
+        - $ref: "#/components/parameters/DryRun"
+        - $ref: "#/components/parameters/Message"
+        - $ref: "#/components/parameters/CommitMessage"
+      requestBody:
+        required: true
+        content:
+          application/yaml:
+            schema:
+              $ref: "#/components/schemas/CatalogSettings"
+      responses:
+        "200":
+          description: Written, would be (`dryRun`), or unchanged.
+          headers:
+            ETag:
+              $ref: "#/components/headers/DigestETag"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettingsResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WritesOff"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
+        "413":
+          $ref: "#/components/responses/TooLarge"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "428":
+          $ref: "#/components/responses/PreconditionRequired"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/v2/init:
+    get:
+      tags: [Setup]
+      operationId: getInit
+      summary: Whether the catalog is initialized
+      description: A catalog is initialized once it has a `catalog.yaml`. Until then it takes no other write (`409`).
+      x-served-by: [catalog-server]
+      responses:
+        "200":
+          description: Its state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InitStatus"
+    post:
+      tags: [Setup]
+      operationId: init
+      summary: Initialize the catalog
+      description: |
+        Commits the template's files (`catalog.yaml` and `README.md` by default; the config's
+        `repository.template` otherwise), with `site`, `raw` (`<site>raw/`) and `repo` filled in.
+        A file the repository already has is kept. An empty `repository.dir` becomes a bare git
+        repository.
+      x-served-by: [catalog-server]
+      security:
+        - bearer: []
+      parameters:
+        - $ref: "#/components/parameters/DryRun"
+        - $ref: "#/components/parameters/Message"
+        - $ref: "#/components/parameters/CommitMessage"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InitRequest"
+            example:
+              site: https://catalog.example.com/
+              repo: https://git.example.com/ml/catalog
+      responses:
+        "201":
+          description: Initialized, or would be (`dryRun`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InitResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WritesOff"
+        "409":
+          description: Already initialized, or the repository moved meanwhile.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          $ref: "#/components/responses/TooLarge"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      description: |
+        A token from the server's `tokensFile`; its entry's name and email are the commit's author.
+        The file is read again when it changes. Reads need no token.
+
+  parameters:
+    Model:
+      name: model
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: "^[a-z0-9][a-z0-9._-]*$"
+      example: deepseek-v4-flash
+    VariantId:
+      name: id
+      in: path
+      required: true
+      description: The variant's id, and its file's name. Never `metadata`.
+      schema:
+        type: string
+        pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+      example: sglang-tp4-6000d
+    FullCommit:
+      name: commit
+      in: path
+      required: true
+      description: A full commit id (sha1, or sha256 for a sha256 repository).
+      schema:
+        type: string
+        pattern: "^([0-9a-f]{40}|[0-9a-f]{64})$"
+    IfNoneMatchRead:
+      name: If-None-Match
+      in: header
+      description: catalog-server only. The `ETag` held; `304` when it is still current.
+      schema:
+        type: string
+    IfNoneMatchCreate:
+      name: If-None-Match
+      in: header
+      description: "`*` to add the file: `412` if it exists."
+      schema:
+        type: string
+        const: "*"
+    IfMatch:
+      name: If-Match
+      in: header
+      description: |
+        The digest the file was read at (its `ETag`, quoted or bare). Needed to replace a file:
+        `428` without it when the file exists, `412` with the current digest when it changed.
+      schema:
+        type: string
+      example: '"sha256:0226cd126fdd91d0b161e8fc3c357446bd808c12c88afa62086ecbe6926022f4"'
+    IfMatchRequired:
+      name: If-Match
+      in: header
+      description: The digest the file was read at (its `ETag`). `428` without it, `412` with the current digest when it changed.
+      schema:
+        type: string
+    DryRun:
+      name: dryRun
+      in: query
+      description: "`true` or `1`: check the write and answer with what it would serve, committing nothing (`commit` is null)."
+      schema:
+        type: string
+        enum: ["true", "1"]
+    Message:
+      name: message
+      in: query
+      description: The commit's message, for text a header cannot carry. `X-Commit-Message` wins.
+      schema:
+        type: string
+    CommitMessage:
+      name: X-Commit-Message
+      in: header
+      description: "The commit's message. Default: `<model>/<id>: <version>`, `<model>/<id>: delete`, `<model>: metadata`, `<model>: add model`, `catalog: settings`, or `Initialize the catalog`."
+      schema:
+        type: string
+
+  headers:
+    CommitETag:
+      description: catalog-server only. The commit served, quoted.
+      schema:
+        type: string
+    DigestETag:
+      description: catalog-server only. The file's digest, quoted -- what a write names in `If-Match`.
+      schema:
+        type: string
+      example: '"sha256:0226cd126fdd91d0b161e8fc3c357446bd808c12c88afa62086ecbe6926022f4"'
+    Immutable:
+      schema:
+        type: string
+        const: public, max-age=31536000, immutable
+
+  responses:
+    NotModified:
+      description: catalog-server only. The client's copy is current.
+    NotFound:
+      description: Not in this catalog.
+      content:
+        text/plain:
+          schema:
+            type: string
+            const: "not in this catalog\n"
+    ServerError:
+      description: The catalog could not be built. server/ says why in plain text; catalog-server in JSON.
+      content:
+        text/plain:
+          schema:
+            type: string
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Written:
+      description: |
+        Committed (`201` when it adds a file), would be (`dryRun`), or nothing to commit
+        (`unchanged`). With `ETag`, the written file's digest -- none after a delete.
+      headers:
+        ETag:
+          $ref: "#/components/headers/DigestETag"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/WriteResult"
+    BadRequest:
+      description: The body is not the JSON this takes.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthorized:
+      description: No bearer token, or one in no entry of the tokens file.
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+            const: Bearer realm="catalog"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    WritesOff:
+      description: The server has no `tokensFile`, so takes no writes.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: |
+        The catalog is not initialized (`POST api/v2/init` first), or the branch moved while this was
+        written -- someone pushed meanwhile: read again and retry. Nothing moved.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    PreconditionFailed:
+      description: |
+        `If-Match` is not the file's current digest, the file is gone, or `If-None-Match: *` and it
+        exists. `current` is the digest it has (null: none).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    TooLarge:
+      description: A body is at most 1 MiB.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unprocessable:
+      description: Not a change this catalog takes. `problems` lists every one found, with the version to send when it is the version.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error: not a change this catalog takes
+            problems:
+              - "models/deepseek-v4-flash/sglang-tp4-6000d.yaml: version: 1.0.0 does not raise 1.0.0, the last revision's -- send 1.0.1 or above"
+    PreconditionRequired:
+      description: The file exists, and the request sent no `If-Match`. `current` is its digest.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unavailable:
+      description: The server cannot read the catalog's repository, or its tokens file.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+    Commit:
+      type: string
+      pattern: "^[0-9a-f]{40}$"
+    Digest:
+      description: sha256 of the file's bytes.
+      type: string
+      pattern: "^sha256:[0-9a-f]{64}$"
+    Path:
+      type: string
+      pattern: "^models/[a-z0-9][a-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$"
+    Deprecated:
+      description: true, or why.
+      type: [boolean, string]
+
+    Chart:
+      description: Chart name and a version or helm version range. Never a repository.
+      type: object
+      required: [name, version]
+      properties:
+        name:
+          enum: [sglang, vllm]
+        version:
+          type: string
+    Image:
+      description: Canonical upstream engine image; the site profile rewrites the repository to its mirror.
+      type: object
+      required: [repository, tag]
+      properties:
+        repository:
+          type: string
+        tag:
+          type: string
+        digest:
+          $ref: "#/components/schemas/Digest"
+    Requires:
+      description: What the variant needs to schedule.
+      type: object
+      required: [gpus]
+      properties:
+        gpus:
+          description: GPUs per pod; 0 is CPU only.
+          type: integer
+          minimum: 0
+          maximum: 8
+        nodes:
+          description: Pods per group.
+          type: integer
+          minimum: 1
+        topology:
+          enum: [single-node, lws, pd]
+        gpuProduct:
+          type: array
+          items:
+            type: string
+        minGpuMemoryGiB:
+          type: number
+        rdma:
+          type: boolean
+        vendor:
+          enum: [nvidia, ascend, cambricon, hygon, amd]
+
+    IndexV2:
+      description: "index-v2.json. Schema: schema/index-v2.schema.json."
+      type: object
+      required: [apiVersion, count, models]
+      properties:
+        apiVersion:
+          const: catalog.swiss/v2
+        site:
+          description: Where the catalog is served (catalog.yaml's), with a trailing slash.
+          type: string
+        repo:
+          description: |
+            Its repository's web URL (catalog.yaml's), without a trailing slash. A revision's commit
+            is at `{repo}/commit/{sha}`, its file at `{repo}/blob/{commit}/{path}`: on GitHub
+            (`https://github.com/<owner>/<repo>`), or catalog-server's own `commit/` and `blob/` when
+            `repo` is the server.
+          type: string
+        raw:
+          description: |
+            Old revisions are at `{raw}{commit}/{path}`: what swiss fetches a pinned revision from.
+            catalog.yaml's, or `https://raw.githubusercontent.com/<owner>/<repo>/` for a GitHub repo
+            (server/ and the published site); catalog-server's is `<site>raw/`, which it serves.
+          type: string
+        commit:
+          description: The last commit that changed models/ or catalog.yaml.
+          $ref: "#/components/schemas/Commit"
+        count:
+          type: integer
+          minimum: 0
+        models:
+          type: array
+          items:
+            $ref: "#/components/schemas/ModelV2"
+    ModelV2:
+      type: object
+      required: [name, reports, tuning, variants]
+      properties:
+        name:
+          type: string
+        displayName:
+          type: string
+        description:
+          type: string
+        family:
+          type: string
+        series:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        deprecated:
+          $ref: "#/components/schemas/Deprecated"
+        source:
+          type: object
+          properties:
+            hf:
+              type: string
+            revision:
+              type: string
+            sizeGiB:
+              type: number
+        quantization:
+          type: string
+        defaultVariant:
+          description: The first variant when absent.
+          type: string
+        reports:
+          description: Perf reports at `models/<name>/<report>`.
+          type: array
+          items:
+            type: string
+        tuning:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tuning"
+        variants:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/VariantSummary"
+    Tuning:
+      type: object
+      required: [baseline, optimized]
+      properties:
+        baseline:
+          description: A variant id, optionally `@<version>`.
+          type: string
+        optimized:
+          type: string
+        uplift:
+          type: number
+        workloads:
+          type: array
+          items:
+            type: object
+            required: [name, uplift]
+            properties:
+              name:
+                type: string
+              uplift:
+                type: number
+        report:
+          description: Absent when the report is not linkable.
+          type: string
+    VariantSummary:
+      description: A variant without its values.
+      type: object
+      required: [id, version, path, digest, engine, chart, requires, history]
+      properties:
+        id:
+          type: string
+        version:
+          type: string
+        releaseDate:
+          description: Its commit's committer date, UTC. Absent when uncommitted.
+          type: string
+          format: date
+        commit:
+          description: The last commit that changed the file; with path and digest, what a deploy pins.
+          $ref: "#/components/schemas/Commit"
+        path:
+          $ref: "#/components/schemas/Path"
+        digest:
+          $ref: "#/components/schemas/Digest"
+        history:
+          description: Its history.json.
+          type: string
+        servedName:
+          type: string
+        engine:
+          type: string
+        description:
+          type: string
+        link:
+          type: string
+          pattern: "^https?://"
+        chart:
+          $ref: "#/components/schemas/Chart"
+        image:
+          $ref: "#/components/schemas/Image"
+        requires:
+          $ref: "#/components/schemas/Requires"
+        deprecated:
+          $ref: "#/components/schemas/Deprecated"
+        replaces:
+          type: string
+
+    History:
+      description: "`models/<model>/<id>.history.json`."
+      type: object
+      required: [model, id, path, revisions]
+      properties:
+        model:
+          type: string
+        id:
+          type: string
+        path:
+          $ref: "#/components/schemas/Path"
+        revisions:
+          description: Newest first.
+          type: array
+          items:
+            type: object
+            required: [version, releaseDate, commit, digest]
+            properties:
+              version:
+                type: string
+              releaseDate:
+                type: string
+                format: date
+              commit:
+                $ref: "#/components/schemas/Commit"
+              digest:
+                $ref: "#/components/schemas/Digest"
+              subject:
+                description: The commit's subject.
+                type: string
+        deleted:
+          description: The commit that deleted the file, when it is gone.
+          type: object
+          properties:
+            commit:
+              $ref: "#/components/schemas/Commit"
+            subject:
+              type: string
+
+    IndexV1:
+      description: index.json. server/ only.
+      type: object
+      required: [apiVersion, count, models]
+      properties:
+        apiVersion:
+          const: catalog.swiss/v1
+        site:
+          type: string
+        count:
+          type: integer
+        models:
+          type: array
+          items:
+            type: object
+            required: [name, latest, versions]
+            properties:
+              name:
+                type: string
+              displayName:
+                type: string
+              description:
+                type: string
+              family:
+                type: string
+              tags:
+                type: array
+                items:
+                  type: string
+              deprecated:
+                $ref: "#/components/schemas/Deprecated"
+              tuning:
+                description: metadata.yaml's; a v2 model's only those with a v1 `version`.
+                type: array
+                items:
+                  type: object
+              source:
+                type: object
+                properties:
+                  hf:
+                    type: string
+                  revision:
+                    type: string
+                  sizeGiB:
+                    type: number
+              latest:
+                description: The highest version, a release over a prerelease.
+                type: string
+              versions:
+                description: Newest first.
+                type: array
+                items:
+                  type: object
+                  required: [version, path, digest, variants]
+                  properties:
+                    version:
+                      type: string
+                    path:
+                      description: The version file, relative to index.json.
+                      type: string
+                    digest:
+                      $ref: "#/components/schemas/Digest"
+                    variants:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          id:
+                            type: string
+                          engine:
+                            type: string
+                          default:
+                            type: boolean
+                          description:
+                            type: string
+                          link:
+                            type: string
+                          chart:
+                            $ref: "#/components/schemas/Chart"
+                          requires:
+                            $ref: "#/components/schemas/Requires"
+
+    Variant:
+      description: |
+        A v2 variant file, YAML. Its `version` is raised on every change. Full schema:
+        `schema/variant.schema.json`.
+      type: object
+      required: [apiVersion, kind, model, id, version, engine, chart, requires]
+      properties:
+        apiVersion:
+          const: catalog.swiss/v2
+        kind:
+          const: Variant
+        model:
+          type: string
+        id:
+          type: string
+        version:
+          type: string
+          pattern: "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$"
+        servedName:
+          type: string
+        description:
+          type: string
+        link:
+          type: string
+        engine:
+          type: string
+        chart:
+          $ref: "#/components/schemas/Chart"
+        image:
+          $ref: "#/components/schemas/Image"
+        requires:
+          $ref: "#/components/schemas/Requires"
+        values:
+          description: The chart's values.
+          type: object
+        deprecated:
+          $ref: "#/components/schemas/Deprecated"
+        replaces:
+          type: string
+    Metadata:
+      description: "A v2 model's metadata.yaml, YAML. Full schema: `schema/metadata.v2.schema.json`."
+      type: object
+      required: [apiVersion, name]
+      properties:
+        apiVersion:
+          const: catalog.swiss/v2
+        name:
+          type: string
+        displayName:
+          type: string
+        description:
+          type: string
+        homepage:
+          type: string
+        license:
+          type: string
+        family:
+          type: string
+        series:
+          type: string
+        quantization:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        deprecated:
+          $ref: "#/components/schemas/Deprecated"
+        defaultVariant:
+          type: string
+        tuning:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tuning"
+        source:
+          type: object
+    CatalogSettings:
+      description: "catalog.yaml, YAML. Schema: schema/catalog.schema.json."
+      type: object
+      required: [apiVersion]
+      additionalProperties: false
+      properties:
+        apiVersion:
+          const: catalog.swiss/v1
+        site:
+          type: string
+          format: uri
+        raw:
+          type: string
+          format: uri
+        repo:
+          type: string
+          format: uri
+
+    NewModel:
+      type: object
+      required: [metadata, variants]
+      properties:
+        metadata:
+          description: The model's metadata.yaml, as text.
+          type: string
+        variants:
+          description: Its variant files, as text.
+          type: array
+          minItems: 1
+          items:
+            type: string
+    WriteResult:
+      description: What a write did -- its commit -- and the index's entry for what it wrote.
+      type: object
+      required: [commit, path]
+      properties:
+        commit:
+          description: The new tip; the current one when `unchanged`; otherwise null for a dry run.
+          type: [string, "null"]
+        dryRun:
+          const: true
+        unchanged:
+          const: true
+        path:
+          description: The file written (a new model's metadata.yaml).
+          type: string
+        model:
+          type: string
+        id:
+          type: string
+        version:
+          type: string
+        digest:
+          $ref: "#/components/schemas/Digest"
+        releaseDate:
+          type: string
+          format: date
+        history:
+          type: string
+        deleted:
+          const: true
+        variants:
+          description: A new model's variants.
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: string
+              version:
+                type: string
+              digest:
+                $ref: "#/components/schemas/Digest"
+              path:
+                type: string
+      example:
+        commit: 3f9c2a1e0b7d4c5a6e8f9012345678901234abcd
+        path: models/deepseek-v4-flash/sglang-tp4-6000d.yaml
+        model: deepseek-v4-flash
+        id: sglang-tp4-6000d
+        version: 1.0.1
+        digest: sha256:0226cd126fdd91d0b161e8fc3c357446bd808c12c88afa62086ecbe6926022f4
+        releaseDate: "2026-10-20"
+        history: models/deepseek-v4-flash/sglang-tp4-6000d.history.json
+    SettingsResult:
+      type: object
+      required: [commit, path]
+      properties:
+        commit:
+          type: [string, "null"]
+        dryRun:
+          const: true
+        unchanged:
+          const: true
+        path:
+          const: catalog.yaml
+        digest:
+          $ref: "#/components/schemas/Digest"
+        site:
+          type: string
+        raw:
+          type: string
+        repo:
+          type: string
+    InitStatus:
+      type: object
+      required: [initialized, commit]
+      properties:
+        initialized:
+          type: boolean
+        commit:
+          description: The branch's tip; null for an empty repository.
+          type: [string, "null"]
+    InitRequest:
+      type: object
+      properties:
+        site:
+          description: Where the catalog is served; its `raw` is `<site>raw/`.
+          type: string
+        repo:
+          description: Its repository's web URL -- a git host's, or this server's.
+          type: string
+    InitResult:
+      type: object
+      required: [commit, initialized, files]
+      properties:
+        commit:
+          type: [string, "null"]
+        dryRun:
+          const: true
+        initialized:
+          description: False for a dry run.
+          type: boolean
+        files:
+          description: The template files committed.
+          type: array
+          items:
+            type: string
+    Capabilities:
+      type: object
+      required: [apiVersion, write, auth]
+      properties:
+        apiVersion:
+          const: catalog.swiss/v2
+        write:
+          description: Whether the server has a tokensFile.
+          type: boolean
+        auth:
+          const: bearer
+    Health:
+      type: object
+      required: [commit, warnings]
+      properties:
+        commit:
+          type: [string, "null"]
+        problem:
+          description: What went wrong last reading the repository.
+          type: string
+        warnings:
+          description: Files skipped -- YAML that does not parse -- and reports not linked.
+          type: array
+          items:
+            type: string
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        problems:
+          description: "422: every problem found."
+          type: array
+          items:
+            type: string
+        current:
+          description: "412, 428: the file's current digest; null when there is none."
+          oneOf:
+            - $ref: "#/components/schemas/Digest"
+            - type: "null"
