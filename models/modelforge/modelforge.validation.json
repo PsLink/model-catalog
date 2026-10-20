@@ -1,0 +1,15 @@
+{
+  "schema_version": 2,
+  "model": "modelforge",
+  "variants": [
+    {
+      "variant_id": "sglang-tp2-h800-optimized",
+      "version": "1.0.0",
+      "track_slug": "modelforge-h800-v2",
+      "source_run_id": 81,
+      "role": "optimized",
+      "file": "sglang-tp2-h800-optimized.yaml",
+      "content_sha256": "3f59edcba054b6ef552e21788d670e6eea4460f3f0ad4597441a583e587a2807"
+    }
+  ]
+}
