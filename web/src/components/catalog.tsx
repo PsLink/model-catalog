@@ -246,8 +246,9 @@ function FilterToggles({
 }
 
 // The hardware filter: one toggle per GPU, grouped by gpuGroup. counts is per GPU.
-export function GpuToggles(props: TogglesProps) {
-  return <FilterToggles label="GPU" hue={gpuHue} group={gpuGroup} {...props} />;
+export function GpuToggles({ counts, ...props }: TogglesProps) {
+  const gpus = Object.fromEntries(Object.entries(counts).filter(([k]) => k !== "NO-GPU"));
+  return <FilterToggles label="GPU" hue={gpuHue} group={gpuGroup} counts={gpus} {...props} />;
 }
 
 // The topology filter, alike: single-node, LeaderWorkerSet, prefill/decode-disaggregated. counts is per topology.
