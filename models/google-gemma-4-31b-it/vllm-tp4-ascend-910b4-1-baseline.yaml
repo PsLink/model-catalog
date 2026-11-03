@@ -1,0 +1,73 @@
+# Serving configs measured, and where marked tuned, by LLM AutoTune.
+apiVersion: catalog.swiss/v2
+kind: Variant
+model: google-gemma-4-31b-it
+id: vllm-tp4-ascend-910b4-1-baseline
+version: 1.0.0
+servedName: gemma-4-31B-it
+description: 'Baseline: TP4 on four ASCEND-910B4-1 cards, single node.'
+engine: vllm
+chart:
+  name: vllm
+  version: '>=0.7.6'
+image:
+  repository: quay.io/ascend/vllm-ascend
+  tag: v0.23.0
+  digest: sha256:471744200c5d0c768c1f6c6a6816dcae0fd551de2487d4d129b6fb750024ce6a
+requires:
+  gpus: 0
+  topology: single-node
+values:
+  env:
+    - name: VLLM_USE_V1
+      value: '1'
+  cart:
+    enabled: false
+  model:
+    hostPathType: Directory
+    contextLength: ''
+  volumes:
+    - name: dot-cache
+      emptyDir:
+        sizeLimit: 10Gi
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 16Gi
+  extraArgs:
+    - --enable-prompt-tokens-details
+    - --tensor-parallel-size=4
+    - --max-model-len=65536
+    - --enforce_eager
+  resources:
+    limits:
+      cpu: '16'
+      memory: 64Gi
+      ephemeral-storage: 16Gi
+      volcano.sh/Ascend910B4-1: '4'
+    requests:
+      cpu: '8'
+      memory: 32Gi
+      ephemeral-storage: 16Gi
+      volcano.sh/Ascend910B4-1: '4'
+  modelCheck:
+    enabled: false
+    requiredGlobs:
+      - config.json
+      - '*.safetensors'
+  hangWatcher:
+    enabled: false
+  startupProbe:
+    httpGet:
+      path: /health
+      port: http
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 180
+  volumeMounts:
+    - name: dot-cache
+      mountPath: /root/.cache
+    - name: dshm
+      mountPath: /dev/shm
+  schedulerName: volcano
+  progressDeadlineSeconds: 7200
