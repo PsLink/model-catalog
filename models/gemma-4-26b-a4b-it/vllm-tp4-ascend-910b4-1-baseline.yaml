@@ -1,0 +1,68 @@
+# Serving configs measured, and where marked tuned, by LLM AutoTune.
+apiVersion: catalog.swiss/v2
+kind: Variant
+model: gemma-4-26b-a4b-it
+id: vllm-tp4-ascend-910b4-1-baseline
+version: 1.0.0
+servedName: gemma-4-26B-A4B-it
+description: 'Baseline: TP4 on four ASCEND-910B4-1 GPUs, single node.'
+engine: vllm
+chart:
+  name: vllm
+  version: '>=0.5.0'
+image:
+  repository: quay.io/ascend/vllm-ascend
+  tag: v0.23.0
+  digest: sha256:471744200c5d0c768c1f6c6a6816dcae0fd551de2487d4d129b6fb750024ce6a
+requires:
+  gpus: 4
+  topology: single-node
+  vendor: ascend
+  gpuProduct:
+    - Ascend-910B4
+values:
+  model:
+    hostPathType: Directory
+    contextLength: '65536'
+  modelCheck:
+    enabled: true
+    requiredGlobs:
+      - config.json
+      - '*.safetensors'
+  extraArgs:
+    - --enforce-eager
+    - --tensor-parallel-size=4
+  volumes:
+    - name: dot-cache
+      emptyDir:
+        sizeLimit: 10Gi
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 32Gi
+  volumeMounts:
+    - name: dot-cache
+      mountPath: /root/.cache
+    - name: dshm
+      mountPath: /dev/shm
+  resources:
+    requests:
+      ephemeral-storage: 16Gi
+    limits:
+      ephemeral-storage: 16Gi
+  progressDeadlineSeconds: 7200
+  startupProbe:
+    httpGet:
+      path: /health
+      port: http
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 180
+  terminationGracePeriodSeconds: 3600
+  lifecycle:
+    preStop:
+      drainSeconds: 600
+      pollIntervalSeconds: 5
+    preStopKill: true
+  hangWatcher:
+    enabled: true
