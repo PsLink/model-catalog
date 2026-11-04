@@ -1,0 +1,181 @@
+apiVersion: catalog.swiss/v2
+kind: Variant
+model: deepseek-v4-flash-0731-nvfp4
+id: sglang-tp8-l3-6000d
+version: 1.0.3
+servedName: deepseek-v4-flash-0731-nvfp4
+engine: sglang
+description: >-
+  TP8 on one RTX 6000D node with HiCache: L2 in hugepages (ratio 2) and
+  Mooncake NVMe-oF as L3 on a shared EBOF array, through a standalone
+  (non-HA) master. Measured: 5 rounds of 8 x 8.4k-token prefixes read back in
+  parallel plus 2 x 28k serial after an engine restart hit 100% of the
+  cacheable tokens from L3 with every needle answered, and a per-object md5
+  trace of every KV pool matched what was written. Decode 120 tok/s at
+  concurrency 1, 608 tok/s aggregate at 8.
+chart:
+  name: sglang
+  version: ">=0.9.27"
+# The stock image, like the other 6000D L3 variants. What L3 on NVMe-oF needs
+# from it: a Mooncake client with NoF support, and HiCache host pools whose
+# page stride is a 512-byte multiple (see mem-layout below). Also check that
+# Mooncake's SPDK init leaves the scheduler threads their CPU affinity: clients
+# before Mooncake PR #3904 pin all eight to CPU 0 (measured: decode 39 vs 120
+# tok/s); look at Cpus_allowed_list of the sglang::scheduler processes.
+image:
+  repository: lmsysorg/sglang
+  tag: v0.5.21
+requires:
+  gpus: 8
+  topology: single-node
+  rdma: true
+  gpuProduct:
+    - NVIDIA-RTX-6000D
+  # Not expressible in this block, but required on the node:
+  #   * ~650 GiB of 2 MiB hugepages reserved AND advertised by kubelet
+  #   * routes to the EBOF targets on the storage NICs
+values:
+  model:
+    localPath: /data/models/DeepSeek-V4-Flash-0731-NVFP4
+    mountPath: /models
+    hostPathType: Directory
+    contextLength: ""
+  modelCheck:
+    enabled: true
+    requiredGlobs:
+      - config.json
+      - "*.safetensors"
+  extraArgs:
+    # This engine fetches client-supplied http(s) media URLs server-side, and
+    # with no allowlist any domain is allowed. On a hostNetwork pod that turns
+    # an image_url into a request from the node itself.
+    - --allowed-media-domains=none.invalid
+    - --tp-size=8
+    # Required on sm120: the default trtllm runner has no sm120 kernels and
+    # flashinfer_cutlass serves but miscomputes.
+    - --moe-runner-backend=marlin
+    - --mem-fraction-static=0.80
+    - --chunked-prefill-size=4096
+    - --max-prefill-tokens=4096
+    - --trust-remote-code
+    - --max-running-requests=256
+    - --enable-cache-report
+    - '--default-chat-template-kwargs={"thinking": true}'
+    - --reasoning-parser=deepseek-v4
+    - --tool-call-parser=deepseekv4
+  env:
+    - name: NVIDIA_DISABLE_REQUIRE
+      value: "1"
+    # Mooncake cannot register expandable-segment memory for RDMA.
+    - name: PYTORCH_ALLOC_CONF
+      value: expandable_segments:False
+    # With P2PHANDSHAKE peers dial this; unset, the segment is registered as
+    # "localhost:<port>" and nobody else can reach it.
+    - name: MOONCAKE_LOCAL_HOSTNAME
+      valueFrom:
+        fieldRef:
+          fieldPath: status.podIP
+    # Per process, per worker. At the 4 MiB default, eight ranks reading one
+    # long prefix back at once tore NoF qpairs down (CQ transport error -6 ->
+    # SQ DELETION) and 63-82% of the prefix missed, every round; at 1 MiB six
+    # rounds out of six hit 100%. Measured 2026-11-03.
+    - name: MC_NOF_INFLIGHT_BYTES_LIMIT
+      value: "1048576"
+    # Required for hugepage-backed pools >= 4 GiB: without it registration dies
+    # with "Failed to register memory ...: Invalid argument [22]" -> -600.
+    - name: RDMAV_HUGEPAGES_SAFE
+      value: "1"
+  shm:
+    enabled: true
+    sizeLimit: 64Gi
+  service:
+    port: 8050
+  hangWatcher:
+    enabled: true
+  hostNetwork: true
+  rdma:
+    enabled: true
+  scaler:
+    enabled: false
+  # SPDK needs these three, and NOT privileged: a privileged container receives
+  # every device on the host, which defeats the GPU device plugin.
+  securityContext:
+    capabilities:
+      add: ["SYS_ADMIN", "IPC_LOCK", "SYS_RESOURCE"]
+  volumes:
+    - name: engine-cache
+      hostPath:
+        path: /data/cache/deepseek-v4-flash-0731-nvfp4/sglang
+        type: DirectoryOrCreate
+  volumeMounts:
+    - name: engine-cache
+      mountPath: /root/.cache
+  # Only the RDMA device is asked for here; the chart merges in the GPUs and
+  # the hugepage limit from storageKVOffload. It adds rdma/hca_shared by itself
+  # only for multi-node (lws) and PD pods, so a single-node pod without this
+  # line has no RDMA device at all: the first deployment came up with "No RDMA
+  # devices found" and "Failed to setup Mooncake store, error code: -1".
+  resources:
+    limits:
+      rdma/hca_shared: "1"
+  startupProbe:
+    httpGet:
+      path: /health
+      port: http
+    periodSeconds: 30
+    timeoutSeconds: 10
+    failureThreshold: 180
+  progressDeadlineSeconds: 7200
+  # Only nodes on the EBOF storage network can reach the NoF targets; the
+  # GPU nodes without it are otherwise just as schedulable, and a pod placed
+  # there starts, then fails every L3 transfer.
+  nodeSelector:
+    ebof.modelsphere.io/storage-net: "true"
+  tolerations:
+    - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+    - { key: ebof-test, operator: Exists, effect: NoSchedule }
+    - { key: dedicated, operator: Exists, effect: NoSchedule }
+  storageKVOffload:
+    enabled: true
+    backend: hicache
+    storage_backend: mooncake
+    hicache:
+      # A ratio, not size: DeepSeek V4 HiCache refuses an absolute size ("use
+      # --hicache-ratio instead"). At 2 the host pools come to 85 GB per rank
+      # (swa 30.2, c4 36.9, c4_indexer 8.3, c4_state 6.5, c128 1.6,
+      # c4_indexer_state 1.6), ~636 GiB of hugepages over eight ranks.
+      ratio: 2
+      # Required for L3 on NVMe-oF, not tuning. NoF moves whole 512-byte
+      # blocks; with the default page_first layout the per-page objects of four
+      # pools are 786240 / 177408 / 34560 / 6439680 bytes, the client rejects
+      # every one ("not aligned to block size 512" -> TRANSFER_FAIL), and
+      # nothing but the two state pools reaches L3. page_first_direct pads each
+      # page's stride to a 512-byte multiple (786432 / 177664 / 34816 /
+      # 6439936), and its transfer path exists only with the direct IO backend.
+      # Decode speed was the same with direct as with kernel.
+      mem-layout: page_first_direct
+      io-backend: direct
+      # timeout, with a budget that a cold read off the array meets; the default
+      # (1 s + 0.25 s per 1Ki tokens) abandons prefetches silently.
+      storage-prefetch-policy: timeout
+      # replica_num 0 / nof_replica_num 1 = pure NoF: no DRAM replica.
+      storage-backend-extra-config: '{"replica_num": 0, "nof_replica_num": 1, "prefetch_timeout_base": 10, "prefetch_timeout_per_ki_token": 2.0}'
+    mooncake:
+      # Standalone, outside Kubernetes, owning NoF volumes no other master
+      # holds. SITE-SPECIFIC: replace the placeholder host with yours.
+      master: "mooncake-master.example:50051"
+      te_meta_data_server: "http://mooncake-master.example:8080/metadata"
+      protocol: "rdma"
+      # The storage NICs; left to auto-detect Mooncake has picked the
+      # management NIC on this cluster.
+      device: "mlx5_3,mlx5_4"
+      # Must NOT be 0: the startup warmup put still needs a DRAM segment.
+      global_segment_size: "1gb"
+      use_hugepage: true
+      hugepage:
+        page_size: "2MB"
+        # 8 x (85 GB of host pools + 1 GiB segment) ~= 644 GiB (measured 636
+        # GiB in use); the nodes advertise 660 GiB.
+        resource_limit: "650Gi"
+  localKVOffload:
+    enabled: false
