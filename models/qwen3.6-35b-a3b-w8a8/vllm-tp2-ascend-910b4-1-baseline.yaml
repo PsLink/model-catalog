@@ -1,0 +1,94 @@
+# Serving configs measured, and where marked tuned, by LLM AutoTune.
+apiVersion: catalog.swiss/v2
+kind: Variant
+model: qwen3.6-35b-a3b-w8a8
+id: vllm-tp2-ascend-910b4-1-baseline
+version: 1.0.0
+servedName: qwen3.6-35b-a3b
+description: 'Baseline: TP2 on two ASCEND-910B4-1 cards, single node, ascend weights.'
+engine: vllm
+chart:
+  name: vllm
+  version: '>=0.8.23'
+image:
+  repository: quay.io/ascend/vllm-ascend
+  tag: pinned@sha256:7859b75177884252d2b703eff727831ccab4e33a8bde0a9b4ac7563facc98b33
+requires:
+  gpus: 0
+  topology: single-node
+values:
+  env:
+    - name: PYTORCH_NPU_ALLOC_CONF
+      value: expandable_segments:True
+    - name: HCCL_BUFFSIZE
+      value: '1024'
+    - name: VLLM_USE_V2_MODEL_RUNNER
+      value: '1'
+    - name: VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS
+      value: '3000'
+    - name: HCCL_OP_EXPANSION_MODE
+      value: AIV
+    - name: OMP_PROC_BIND
+      value: 'false'
+    - name: OMP_NUM_THREADS
+      value: '1'
+    - name: OPENBLAS_NUM_THREADS
+      value: '1'
+    - name: TASK_QUEUE_ENABLE
+      value: '1'
+  cart:
+    enabled: false
+  model:
+    mountPath: /models
+    hostPathType: Directory
+    contextLength: '135168'
+  scaler:
+    enabled: false
+  dnsPolicy: ClusterFirstWithHostNet
+  resources:
+    limits:
+      cpu: '16'
+      memory: 128Gi
+      volcano.sh/Ascend910B4-1: '2'
+    requests:
+      cpu: '16'
+      memory: 128Gi
+      volcano.sh/Ascend910B4-1: '2'
+  modelCheck:
+    enabled: false
+  hangWatcher:
+    enabled: false
+  hostNetwork: true
+  startupProbe:
+    httpGet:
+      path: /health
+      port: http
+    periodSeconds: 10
+    failureThreshold: 360
+    initialDelaySeconds: 60
+  schedulerName: volcano
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: http
+    periodSeconds: 10
+    failureThreshold: 3
+  commandOverride:
+    - bash
+    - -c
+    - |
+      exec vllm serve /models \
+        --host 0.0.0.0 --port 8000 \
+        --served-model-name qwen3.6-35b-a3b \
+        --data-parallel-size 1 --tensor-parallel-size 2 \
+        --enable-expert-parallel --quantization ascend \
+        --max-num-seqs 128 --max-model-len 135168 --max-num-batched-tokens 4096 \
+        --trust-remote-code --safetensors-load-strategy lazy \
+        --gpu-memory-utilization 0.90 --dtype bfloat16 --enable-prefix-caching \
+        --speculative-config '{"method":"qwen3_5_mtp","num_speculative_tokens":3}' \
+        --compilation-config '{"cudagraph_mode":"FULL_AND_PIECEWISE"}' \
+        --additional-config '{"enable_cpu_binding":true,"multistream_overlap_shared_expert":true}'
+  securityContext:
+    privileged: true
+  progressDeadlineSeconds: 7200
+  terminationGracePeriodSeconds: 1200
