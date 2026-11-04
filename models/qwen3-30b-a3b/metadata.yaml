@@ -1,0 +1,15 @@
+apiVersion: catalog.swiss/v2
+name: qwen3-30b-a3b
+displayName: qwen3-30b-a3b
+description: qwen3-30b-a3b on 4 ASCEND-910B4-1 GPUs. Configs use ascend weights.
+family: qwen
+tags:
+  - chat
+  - moe
+origins:
+  - variant: vllm-tp4-ascend-910b4-1-baseline@1.0.0
+    tool: baseline-hub
+    by: link
+    url: http://172.28.4.5:30522/baseline-hub/84
+source:
+  hf: Eco-Tech/Qwen3-30B-A3B-w8a8
