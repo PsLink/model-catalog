@@ -73,12 +73,12 @@ helm install catalog oci://ghcr.io/modelsphere/charts/catalog-server \
 helm test catalog
 ```
 
-| value                                 | does                                                                                                                |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `config.*`                            | `basePath`, `branch`, `syncInterval`, `committer`; `pages` (the web app, on by default); `extra`, any other setting |
-| `tokens.existingSecret`, `tokens.key` | a Secret of your own holding the tokens file, at key `tokens.yaml`; or `tokens.entries`, the entries themselves     |
-| `persistence.*`                       | the volume: `size` (2Gi), `storageClass`, `existingClaim` (one holding a catalog already), `keep`                   |
-| `ingress.*`, `service.*`              | how it is reached                                                                                                   |
+| value                                   | does                                                                                                                |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `config.*`                              | `basePath`, `branch`, `syncInterval`, `committer`; `pages` (the web app, on by default); `extra`, any other setting |
+| `tokens.existingSecret`, `tokens.key`   | a Secret of your own holding the tokens file, at key `tokens.yaml`; or `tokens.entries`, the entries themselves     |
+| `persistence.*`                         | the volume: `size` (2Gi), `storageClass`, `existingClaim` (one holding a catalog already), `keep`                   |
+| `ingress.*`, `httpRoute.*`, `service.*` | how it is reached: an ingress, or a Gateway API HTTPRoute on `httpRoute.parentRefs`                                 |
 
 Without tokens the catalog is read-only, and the web app offers no editing. A changed config rolls the pod; a changed
 tokens Secret is read again in place.
