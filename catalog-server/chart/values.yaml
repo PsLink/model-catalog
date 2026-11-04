@@ -73,6 +73,19 @@ ingress:
   pathType: Prefix
   tls: []
 
+# Or a Gateway API HTTPRoute, attached to a Gateway of yours.
+httpRoute:
+  enabled: false
+  annotations: {}
+  # The Gateways it attaches to.
+  parentRefs: []
+  # - name: gateway-infra
+  #   namespace: monitoring
+  #   sectionName: http
+  hostnames: []
+  path: /
+  pathType: PathPrefix
+
 resources:
   requests: { cpu: 50m, memory: 128Mi }
   limits: { cpu: "1", memory: 512Mi }
