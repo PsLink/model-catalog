@@ -25,16 +25,10 @@ values:
       value: '1'
     - name: PYTORCH_NPU_ALLOC_CONF
       value: expandable_segments:True
-  cart:
-    enabled: false
-  cache:
-    enabled: false
   model:
     mountPath: /models
     hostPathType: Directory
     contextLength: '65536'
-  scaler:
-    enabled: false
   dnsPolicy: ClusterFirstWithHostNet
   extraArgs:
     - --trust-remote-code
