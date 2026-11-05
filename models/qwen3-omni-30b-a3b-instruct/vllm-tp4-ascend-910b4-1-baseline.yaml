@@ -3,32 +3,35 @@ apiVersion: catalog.swiss/v2
 kind: Variant
 model: qwen3-omni-30b-a3b-instruct
 id: vllm-tp4-ascend-910b4-1-baseline
-version: 1.0.1
-description: 'Baseline: TP4 on four ASCEND-910B4-1 cards, single node.'
+version: 1.1.0
+description: "Baseline: TP4 on four ASCEND-910B4-1 cards, single node."
 engine: vllm
 chart:
   name: vllm
-  version: '>=0.8.23'
+  version: ">=0.9.1"
 image:
   repository: quay.io/ascend/vllm-ascend
   tag: pinned@sha256:7859b75177884252d2b703eff727831ccab4e33a8bde0a9b4ac7563facc98b33
 requires:
-  gpus: 0
+  gpus: 4
   topology: single-node
+  vendor: ascend
+  gpuProduct:
+    - Ascend-910B4
 values:
   env:
     - name: HCCL_BUFFSIZE
-      value: '1024'
+      value: "1024"
     - name: OMP_PROC_BIND
-      value: 'false'
+      value: "false"
     - name: OMP_NUM_THREADS
-      value: '1'
+      value: "1"
     - name: PYTORCH_NPU_ALLOC_CONF
       value: expandable_segments:True
   model:
     mountPath: /models
     hostPathType: Directory
-    contextLength: '65536'
+    contextLength: "65536"
   dnsPolicy: ClusterFirstWithHostNet
   extraArgs:
     - --trust-remote-code
@@ -47,13 +50,11 @@ values:
     shutdownTimeout: 0
   resources:
     limits:
-      cpu: '16'
+      cpu: "16"
       memory: 128Gi
-      volcano.sh/Ascend910B4-1: '4'
     requests:
-      cpu: '16'
+      cpu: "16"
       memory: 128Gi
-      volcano.sh/Ascend910B4-1: '4'
   modelCheck:
     enabled: false
   hangWatcher:

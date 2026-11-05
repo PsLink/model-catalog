@@ -1,11 +1,9 @@
 # DeepSeek-V4.1-Flash-1017 (w8a8) on two Ascend 910B4 nodes (Atlas 800T A2), vLLM-Ascend.
 #
-# For a volcano-managed Ascend 910B4 site: the card is requested as volcano.sh/Ascend910B4-1 (the
-# name HAMi's volcano device plugin publishes) through the volcano scheduler, with host networking
-# on bond1 and a host path for CANN logs. requires.gpus is 0 for the reason given at requires
-# (https://github.com/modelsphere/swiss/issues/41). Which pool to land in (pod labels, node
-# selector, tolerations) is not set here: that belongs to the cluster, and a deploy passes it as
-# overrides.
+# For a volcano-managed Ascend 910B4 site: the volcano scheduler, host networking on bond1 and a
+# host path for CANN logs. The site profile's nodes.gpus names the card's resource. Which pool to
+# land in (pod labels, node selector, tolerations) is not set here: that belongs to the cluster,
+# and a deploy passes it as overrides.
 #
 # Translated from the site's own serving runtime for these weights; the command line keeps the
 # runtime's order so the two can be diffed. Deployed through swissd with vllm chart 0.8.23 on such
@@ -16,7 +14,7 @@ apiVersion: catalog.swiss/v2
 kind: Variant
 model: deepseek-v4.1-flash-1017-w8a8
 id: vllm-dp2-tp8-910b4-2node
-version: 1.0.2
+version: 1.1.0
 servedName: deepseek-v41
 description: >-
   Two Ascend 910B4 nodes, 8 cards each. vLLM's Ascend backend (CANN) with data-parallel size 2
@@ -25,10 +23,8 @@ description: >-
 engine: vllm
 chart:
   name: vllm
-  # LeaderWorkerSet support (templates/lws.yaml) and the hostNetwork/dnsPolicy values this
-  # variant needs arrived well before 0.8.23; pinned at the version it was written against
-  # because the command below depends on LWS injecting LWS_WORKER_INDEX/LWS_LEADER_ADDRESS.
-  version: ">=0.8.23"
+  # 0.9.1 renders requires.gpus under the site's resource (model.gpuResource).
+  version: ">=0.9.1"
 image:
   # From the ClusterServingRuntime, by digest as the runtime pins it. quay.io and this
   # Huawei SWR registry are both reachable from the site's nodes; docker.io is not.
@@ -40,16 +36,14 @@ image:
   repository: quay.io/ascend/vllm-ascend
   tag: "pinned@sha256:7859b75177884252d2b703eff727831ccab4e33a8bde0a9b4ac7563facc98b33"
 requires:
-  # 0, and no vendor: swiss projects model.gpus from requires.gpus AFTER merging the values
-  # below, so values cannot override it, and the vllm chart turns a non-zero model.gpus into
-  # nvidia.com/gpu -- a resource the site's nodes have 0 of. "0" leaves the key off the pod and the
-  # accelerator is requested under resources instead. vendor has to go with it (the catalog
-  # rejects gpus: 0 while a vendor is set) and would map to huawei.com/Ascend910, also 0 here.
-  # See https://github.com/modelsphere/swiss/issues/41 -- the real fix belongs upstream.
-  gpus: 0
+  # A whole node per pod.
+  gpus: 8
   # A leader and one worker; must equal values.lws.size.
   nodes: 2
   topology: lws
+  vendor: ascend
+  gpuProduct:
+    - Ascend-910B4
 values:
   model:
     mountPath: /models
@@ -88,21 +82,16 @@ values:
   dnsPolicy: ClusterFirstWithHostNet
   securityContext:
     privileged: true
-  # --- Scheduling. The scheduler goes with the resource name below (volcano.sh/* is only
-  # allocated through volcano). Which pool to land in -- podLabels, nodeSelector and
-  # tolerations -- is a fact about the cluster, not the model, so the variant sets none of it
-  # and the deploy passes it as overrides. Both pods of the group must land in one pool.
+  # --- Scheduling. volcano.sh/* resources are only allocated through volcano. Which pool to
+  # land in -- podLabels, nodeSelector and tolerations -- is a fact about the cluster, not the
+  # model, so the variant sets none of it and the deploy passes it as overrides. Both pods of
+  # the group must land in one pool.
   schedulerName: volcano
-  # A whole node per pod. The resource NAME follows the node's pool: volcano.sh/* under a
-  # volcano pool, huawei.com/Ascend910B4-1 under a hami one. Both exist on these machines for
-  # the same physical cards.
   resources:
     requests:
-      volcano.sh/Ascend910B4-1: "8"
       cpu: "32"
       memory: 768Gi
     limits:
-      volcano.sh/Ascend910B4-1: "8"
       cpu: "32"
       memory: 768Gi
   env:
