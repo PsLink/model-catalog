@@ -3,7 +3,7 @@ apiVersion: catalog.swiss/v2
 kind: Variant
 model: qwen3-omni-30b-a3b-instruct
 id: vllm-tp4-ascend-910b4-1-baseline
-version: 1.0.0
+version: 1.0.1
 description: 'Baseline: TP4 on four ASCEND-910B4-1 cards, single node.'
 engine: vllm
 chart:
@@ -25,15 +25,26 @@ values:
       value: '1'
     - name: PYTORCH_NPU_ALLOC_CONF
       value: expandable_segments:True
-  cart:
-    enabled: false
   model:
     mountPath: /models
     hostPathType: Directory
-    contextLength: '40960'
-  scaler:
-    enabled: false
+    contextLength: '65536'
   dnsPolicy: ClusterFirstWithHostNet
+  extraArgs:
+    - --trust-remote-code
+    - --max-num-seqs=100
+    - --max-model-len=65536
+    - --max-num-batched-tokens=16384
+    - --tensor-parallel-size=4
+    - --enable-expert-parallel
+    - --distributed-executor-backend=mp
+    - --no-enable-prefix-caching
+    - --async-scheduling
+    - --compilation-config={"cudagraph_mode":"FULL_DECODE_ONLY"}
+    - --additional-config={"enable_flashcomm1":true,"weight_nz_mode":2}
+    - --gpu-memory-utilization=0.95
+  lifecycle:
+    shutdownTimeout: 0
   resources:
     limits:
       cpu: '16'
@@ -62,21 +73,8 @@ values:
       port: http
     periodSeconds: 10
     failureThreshold: 3
-  commandOverride:
-    - bash
-    - -c
-    - |
-      exec vllm serve /models \
-        --host 0.0.0.0 --port 8000 \
-        --served-model-name qwen3-omni-30b-a3b-instruct \
-        --trust-remote-code \
-        --max-num-seqs 100 --max-model-len 65536 --max-num-batched-tokens 16384 \
-        --tensor-parallel-size 4 --enable-expert-parallel \
-        --distributed-executor-backend mp --no-enable-prefix-caching --async-scheduling \
-        --compilation-config '{"cudagraph_mode":"FULL_DECODE_ONLY"}' \
-        --additional-config '{"enable_flashcomm1":true,"weight_nz_mode":2}' \
-        --gpu-memory-utilization 0.95
   securityContext:
     privileged: true
+  promptTokensDetails: false
   progressDeadlineSeconds: 7200
   terminationGracePeriodSeconds: 1200
