@@ -1,0 +1,14 @@
+apiVersion: catalog.swiss/v2
+name: qwen3-14b
+displayName: qwen3-14b
+description: qwen3-14b on 1 ASCEND-910B4-1 GPU.
+family: qwen
+tags:
+  - chat
+origins:
+  - variant: vllm-tp1-ascend-910b4-1-baseline@1.0.0
+    tool: baseline-hub
+    by: link
+    url: http://172.28.4.5:30522/baseline-hub/97
+source:
+  hf: Qwen/Qwen3-14B
