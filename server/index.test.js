@@ -66,6 +66,42 @@ test("the perf reports index-v2.json lists are served, and catalog.json is gone"
   assert.equal((await fetch(`${base}/catalog.json`)).status, 404);
 });
 
+test("a model with no variants is left out of index-v2 and does not break index.json", async () => {
+  const { dir: bareDir } = fixture([
+    [
+      "2026-10-01T10:00:00Z",
+      "init",
+      {
+        ...catalogFiles,
+        "models/bare/metadata.yaml": { apiVersion: "catalog.swiss/v2", name: "bare", displayName: "Bare", defaultVariant: "gone" },
+      },
+    ],
+  ]);
+  const srv = createServer({ root: bareDir });
+  await new Promise((resolve) => srv.listen(0, "127.0.0.1", resolve));
+  const bareBase = `http://127.0.0.1:${srv.address().port}`;
+  try {
+    const v1 = await (await fetch(`${bareBase}/index.json`)).json();
+    assert.deepEqual(
+      v1.models.map((m) => m.name),
+      ["m1"],
+    );
+    const v2 = await (await fetch(`${bareBase}/index-v2.json`)).json();
+    assert.equal(
+      v2.models.find((m) => m.name === "bare"),
+      undefined,
+    );
+    assert.deepEqual(
+      v2.models.map((m) => m.name),
+      ["m2"],
+    );
+    assert.equal((await fetch(`${bareBase}/models/bare/metadata.yaml`)).status, 200);
+  } finally {
+    srv.close();
+    fs.rmSync(bareDir, { recursive: true, force: true });
+  }
+});
+
 test("nothing outside models/ is served, and only reads are allowed", async () => {
   for (const p of [
     "/catalog.yaml",

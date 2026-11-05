@@ -167,5 +167,6 @@ Needs Node.js 24, and a full git clone (`fetch-depth: 0` in CI): versions, relea
 
 - **Backend and frontend, one GitHub Pages site.**
 - **`index-v2.json` is generated, not committed** (`schema/index-v2.schema.json`). It is a function of `models/`,
-  `catalog.yaml` and their git history, with no timestamp, so the same commit gives the same catalog.
+  `catalog.yaml` and their git history, with no timestamp, so the same commit gives the same catalog. A v2 model
+  with no variant files is omitted.
 - **`history.json` is generated too**: `models/<name>/<id>.history.json`, every revision of a variant file, newest first.

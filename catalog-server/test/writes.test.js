@@ -2,6 +2,7 @@
 // Writes as a client makes them, over HTTP.
 
 const assert = require("node:assert/strict");
+const { execFileSync } = require("node:child_process");
 const crypto = require("node:crypto");
 const { afterEach, beforeEach, test } = require("node:test");
 const { catalogRepo, serve, variant, catalogFiles, YAML } = require("./helpers");
@@ -191,6 +192,237 @@ test("a variant an origin names is not deleted, and the index carries the origin
   const named = await s.json(tp4, { method: "DELETE", headers: { "If-Match": (await s.fetch(tp4)).headers.get("etag") } });
   assert.equal(named.status, 422);
   assert.deepEqual(named.body.problems, ["models/m2/metadata.yaml: origins[0].from names sglang-tp4"]);
+});
+
+test("a model is deleted only when it has no variants, every file under it, and its history stays", async () => {
+  // A perf report beside the variants, and one in a subdirectory: both are
+  // tracked files under the model, and both go with it once it has no variants.
+  repo.commit("2026-10-02T10:00:00Z", "perf reports", {
+    "models/m2/tp8.html": "<!doctype html><title>tp8</title>",
+    "models/m2/reports/extra.html": "<!doctype html><title>extra</title>",
+  });
+  await s.store.sync();
+  assert.equal((await s.fetch("models/m2/tp8.html")).status, 200);
+
+  const rel = "api/v2/models/m2";
+  const meta = "api/v2/models/m2/metadata";
+  const etag = (await s.fetch(meta)).headers.get("etag");
+  const before = await (await s.fetch("index-v2.json")).json();
+  const prior = before.models.find((m) => m.name === "m2").variants;
+  const head = repo.head();
+
+  assert.equal((await s.json(rel, { method: "DELETE" })).status, 428);
+  const stale = await s.json(rel, { method: "DELETE", headers: { "If-Match": `"${sha("other")}"` } });
+  assert.equal(stale.status, 412);
+  assert.equal(stale.body.current, sha(await (await s.fetch(meta)).text()));
+  assert.equal((await s.json("api/v2/models/nope", { method: "DELETE", headers: { "If-Match": etag } })).status, 404);
+  const refused = await s.json(rel, { method: "DELETE", headers: { "If-Match": etag } });
+  assert.equal(refused.status, 422);
+  assert.deepEqual(refused.body.problems, [
+    "models/m2/sglang-tp4.yaml: still a variant -- delete it first",
+    "models/m2/sglang-tp8.yaml: still a variant -- delete it first",
+  ]);
+  assert.equal(repo.head(), head, "nothing committed");
+
+  // The last variant is the default. It goes, and metadata.yaml stays, still naming it.
+  for (const id of ["sglang-tp4", "sglang-tp8"]) {
+    const vrel = `api/v2/models/m2/variants/${id}`;
+    const gone = await s.json(vrel, { method: "DELETE", headers: { "If-Match": (await s.fetch(vrel)).headers.get("etag") } });
+    assert.equal(gone.status, 200, id);
+  }
+  const emptied = await (await s.fetch("index-v2.json")).json();
+  assert.equal(
+    emptied.models.find((m) => m.name === "m2"),
+    undefined,
+  );
+  assert.equal(emptied.count, before.count - 1);
+  const kept = await s.fetch(meta);
+  assert.equal(kept.status, 200);
+  assert.equal(kept.headers.get("etag"), etag, "metadata.yaml was not rewritten");
+  assert.match(await kept.text(), /defaultVariant: sglang-tp8/);
+  assert.equal((await s.fetch("models/m2/tp8.html")).status, 200);
+
+  const stayed = repo.head();
+  const star = await s.json(`${rel}?dryRun=true`, { method: "DELETE", headers: { "If-Match": "*" } });
+  assert.deepEqual([star.status, star.body.dryRun, star.body.deleted, star.body.commit], [200, true, true, null]);
+  assert.equal(repo.head(), stayed);
+
+  const done = await s.json(rel, { method: "DELETE", headers: { "If-Match": etag } });
+  assert.equal(done.status, 200);
+  assert.equal(done.etag, null);
+  assert.deepEqual(
+    { path: done.body.path, model: done.body.model, deleted: done.body.deleted, digest: done.body.digest },
+    { path: "models/m2/metadata.yaml", model: "m2", deleted: true, digest: undefined },
+  );
+  assert.match(repo.show(done.body.commit), /\|m2: delete$/);
+
+  const git = (args) => execFileSync("git", args, { cwd: repo.dir, encoding: "utf8" });
+  assert.deepEqual(git(["diff-tree", "--no-commit-id", "--name-status", "-r", done.body.commit]).trim().split("\n").sort(), [
+    "D\tmodels/m2/metadata.yaml",
+    "D\tmodels/m2/reports/extra.html",
+    "D\tmodels/m2/tp8.html",
+  ]);
+  const listed = git(["ls-tree", "-r", "--name-only", done.body.commit]);
+  assert.equal(
+    listed.split("\n").some((p) => p.startsWith("models/m2/")),
+    false,
+  );
+  assert.match(listed, /^catalog\.yaml$/m);
+  assert.match(listed, /^models\/m1\/metadata\.yaml$/m);
+
+  for (const p of [
+    "api/v2/models/m2/metadata",
+    "api/v2/models/m2/variants/sglang-tp4",
+    "api/v2/models/m2/variants/sglang-tp8",
+    "models/m2/sglang-tp4.yaml",
+    "models/m2/sglang-tp8.yaml",
+    "models/m2/tp8.html",
+  ]) {
+    assert.equal((await s.fetch(p)).status, 404, p);
+  }
+  const index = await (await s.fetch("index-v2.json")).json();
+  assert.deepEqual(
+    index.models.map((m) => m.name),
+    before.models.map((m) => m.name).filter((n) => n !== "m2"),
+  );
+  assert.equal(index.commit, done.body.commit);
+  // A deploy pinned to a variant still finds it, and its history says it is gone.
+  for (const v of prior) {
+    const history = await (await s.fetch(v.history)).json();
+    assert.ok(history.deleted.commit);
+    assert.equal(sha(await (await s.fetch(`raw/${v.commit}/${v.path}`)).text()), v.digest);
+  }
+
+  // Back again: its history goes on, so each variant's version must rise, and change more than that.
+  const metadata = YAML.stringify({ apiVersion: "catalog.swiss/v2", name: "m2", defaultVariant: "sglang-tp8" });
+  const same = await s.json("api/v2/models", {
+    method: "POST",
+    body: JSON.stringify({ metadata, variants: [variant("sglang-tp8"), variant("sglang-tp4", "1.0.0", 4)].map((v) => YAML.stringify(v)) }),
+  });
+  assert.equal(same.status, 422);
+  assert.match(same.body.problems[0], /sglang-tp8\.yaml: version: 1\.0\.0 does not raise 1\.0\.0/);
+  const back = await s.json("api/v2/models", {
+    method: "POST",
+    body: JSON.stringify({
+      metadata,
+      variants: [
+        { ...variant("sglang-tp8", "1.0.1"), description: "again" },
+        { ...variant("sglang-tp4", "1.0.1", 4), description: "again" },
+      ].map((v) => YAML.stringify(v)),
+    }),
+  });
+  assert.equal(back.status, 201);
+  assert.deepEqual(
+    (await (await s.fetch("index-v2.json")).json()).models
+      .find((m) => m.name === "m2")
+      .variants.map((v) => [v.id, v.version])
+      .sort(),
+    [
+      ["sglang-tp4", "1.0.1"],
+      ["sglang-tp8", "1.0.1"],
+    ],
+  );
+});
+
+test("a model's last variant is deleted, and the model stays with none", async () => {
+  const meta = { apiVersion: "catalog.swiss/v2", name: "solo", defaultVariant: "only" };
+  const body = JSON.stringify({ metadata: YAML.stringify(meta), variants: [YAML.stringify(variant("only", "1.0.0", 1, "solo"))] });
+  assert.equal((await s.json("api/v2/models", { method: "POST", body })).status, 201);
+  const rel = "api/v2/models/solo/variants/only";
+  const before = await (await s.fetch("index-v2.json")).json();
+  const listed = before.models.find((m) => m.name === "solo").variants[0];
+  const gone = await s.json(rel, { method: "DELETE", headers: { "If-Match": (await s.fetch(rel)).headers.get("etag") } });
+  assert.equal(gone.status, 200);
+  assert.equal(gone.body.deleted, true);
+  assert.equal((await s.fetch(rel)).status, 404);
+  assert.equal((await s.fetch("api/v2/models/solo/metadata")).status, 200);
+  const git = (args) => execFileSync("git", args, { cwd: repo.dir, encoding: "utf8" });
+  assert.deepEqual(git(["diff-tree", "--no-commit-id", "--name-status", "-r", gone.body.commit]).trim().split("\n"), ["D\tmodels/solo/only.yaml"]);
+  const index = await (await s.fetch("index-v2.json")).json();
+  assert.equal(
+    index.models.find((m) => m.name === "solo"),
+    undefined,
+  );
+  const metaRead = await s.fetch("api/v2/models/solo/metadata");
+  assert.equal(metaRead.status, 200);
+  assert.match(await metaRead.text(), /defaultVariant: only/);
+  const history = await (await s.fetch(listed.history)).json();
+  assert.equal(history.deleted.commit, gone.body.commit);
+  assert.equal(sha(await (await s.fetch(`raw/${listed.commit}/${listed.path}`)).text()), listed.digest);
+
+  // The name it still carries is allowed only while it has no variants.
+  const metaRel = "api/v2/models/solo/metadata";
+  const read = await s.fetch(metaRel);
+  const kept = await put(metaRel, YAML.stringify({ ...meta, displayName: "Solo" }), { "If-Match": read.headers.get("etag") });
+  assert.equal(kept.status, 200);
+  const other = await put("api/v2/models/solo/variants/other", YAML.stringify(variant("other", "1.0.0", 1, "solo")), { "If-None-Match": "*" });
+  assert.equal(other.status, 422);
+  assert.deepEqual(other.body.problems, ['models/solo/metadata.yaml: defaultVariant: "only" is not a variant of solo']);
+  const renamed = await put(metaRel, YAML.stringify({ ...meta, displayName: "Solo", defaultVariant: "other" }), { "If-Match": kept.etag });
+  assert.equal(renamed.status, 200);
+  const added = await put("api/v2/models/solo/variants/other", YAML.stringify({ ...variant("other", "1.0.0", 1, "solo"), description: "back" }), {
+    "If-None-Match": "*",
+  });
+  assert.equal(added.status, 201);
+});
+
+test("a v1 version file does not block deleting a model that has no variants", async () => {
+  repo.commit("2026-10-02T10:00:00Z", "bare, with its v1 version file", {
+    "models/bare/metadata.yaml": { apiVersion: "catalog.swiss/v2", name: "bare", displayName: "Bare" },
+    "models/bare/bare-1.0.0.yaml": "apiVersion: catalog.swiss/v1\nname: bare\nversion: 1.0.0\n",
+  });
+  await s.store.sync();
+  const index = await (await s.fetch("index-v2.json")).json();
+  assert.equal(
+    index.models.find((m) => m.name === "bare"),
+    undefined,
+  );
+  const meta = await s.fetch("api/v2/models/bare/metadata");
+  const done = await s.json("api/v2/models/bare", { method: "DELETE", headers: { "If-Match": meta.headers.get("etag") } });
+  assert.equal(done.status, 200);
+  assert.equal(done.body.deleted, true);
+  const git = (args) => execFileSync("git", args, { cwd: repo.dir, encoding: "utf8" });
+  assert.deepEqual(git(["diff-tree", "--no-commit-id", "--name-status", "-r", done.body.commit]).trim().split("\n").sort(), [
+    "D\tmodels/bare/bare-1.0.0.yaml",
+    "D\tmodels/bare/metadata.yaml",
+  ]);
+});
+
+test("a variant file that does not parse still blocks deleting the model", async () => {
+  repo.commit("2026-10-02T10:00:00Z", "bare, with a variant file that does not parse", {
+    "models/bare/metadata.yaml": { apiVersion: "catalog.swiss/v2", name: "bare", displayName: "Bare" },
+    "models/bare/x.yaml": "apiVersion: catalog.swiss/v2\nkind: Variant\nid: x\nmodel: [\n",
+  });
+  await s.store.sync();
+  const index = await (await s.fetch("index-v2.json")).json();
+  assert.equal(
+    index.models.find((m) => m.name === "bare"),
+    undefined,
+  );
+  const meta = await s.fetch("api/v2/models/bare/metadata");
+  assert.equal(meta.status, 200);
+  const refused = await s.json("api/v2/models/bare", { method: "DELETE", headers: { "If-Match": meta.headers.get("etag") } });
+  assert.equal(refused.status, 422);
+  assert.deepEqual(refused.body.problems, ["models/bare/x.yaml: still a variant -- delete it first"]);
+  assert.equal((await s.fetch("api/v2/models/bare/metadata")).status, 200, "the model stays");
+});
+
+test("a yaml file that parses but is not a variant still blocks deleting the model", async () => {
+  repo.commit("2026-10-02T10:00:00Z", "bare, with yaml that is neither a variant nor a v1 version", {
+    "models/bare/metadata.yaml": { apiVersion: "catalog.swiss/v2", name: "bare", displayName: "Bare" },
+    "models/bare/x.yaml": "apiVersion: catalog.swiss/v2\nkind: Model\nname: bare\n",
+    "models/bare/y.yaml": "not an object\n",
+  });
+  await s.store.sync();
+  const meta = await s.fetch("api/v2/models/bare/metadata");
+  assert.equal(meta.status, 200);
+  const refused = await s.json("api/v2/models/bare", { method: "DELETE", headers: { "If-Match": meta.headers.get("etag") } });
+  assert.equal(refused.status, 422);
+  assert.deepEqual(refused.body.problems, [
+    "models/bare/x.yaml: still a variant -- delete it first",
+    "models/bare/y.yaml: still a variant -- delete it first",
+  ]);
+  assert.equal((await s.fetch("api/v2/models/bare/metadata")).status, 200, "the model stays");
 });
 
 test("metadata is replaced at its digest, naming variants the model has", async () => {

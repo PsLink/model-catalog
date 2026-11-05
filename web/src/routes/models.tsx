@@ -50,6 +50,7 @@ const ModelCard = memo(function ModelCard({ m, scale, hidden }: { m: Model; scal
         {/* Content stays top-aligned; links sit at the bottom so a row's buttons line up. */}
         <div className="flex flex-1 flex-col">
           <ul aria-label="Recipes" className="rounded-lg border border-border">
+            {m.variants.length === 0 && <li className="px-[0.8rem] py-[0.6rem] text-[0.84rem] text-muted-foreground">No recipes.</li>}
             {orderedVariants(m).map((v) => {
               // Cards are narrow, so hardware leads the description line
               // instead of wrapping onto a line of its own.
@@ -156,6 +157,7 @@ const ModelRow = memo(function ModelRow({ m, scale, hidden }: { m: Model; scale:
         {orderedVariants(m).map((v) => (
           <VariantLine key={v.id} m={m} v={v} className={tableVariantLine} idClass="text-[0.82rem]" />
         ))}
+        {m.variants.length === 0 && none}
       </TableCell>
       <TableCell className="text-right">{improvementCell(m, scale) || none}</TableCell>
       <TableCell>{linksCell(base, m) || none}</TableCell>

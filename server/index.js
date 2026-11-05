@@ -2,8 +2,9 @@
 // The catalog server: this checkout as a catalog, live from models/, at the
 // paths the published site has them.
 //
-//   GET /index-v2.json                 v2 models and their variant files: what
-//                                      the web app renders from
+//   GET /index-v2.json                 v2 models that have variant files: what
+//                                      the web app renders from. A model with
+//                                      none is omitted
 //   GET /models/<name>/<id>.yaml       the variant files it names
 //   GET /models/<name>/<id>.history.json
 //   GET /models/<name>/<report>.html   perf reports

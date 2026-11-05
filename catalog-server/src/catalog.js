@@ -7,6 +7,10 @@
 //
 // Only schema v2: a model whose metadata.yaml is not catalog.swiss/v2 is not
 // in the index, and v1 version files (<name>-<version>.yaml) are not served.
+// A v2 model with no variant files stays in dirs, so GET metadata, writes and
+// DELETE still find it, but it is left out of the index. A consumer rejects
+// the whole index when any model has no variants, and deleting a model passes
+// through that state.
 
 const crypto = require("crypto");
 const yaml = require("yaml");
@@ -214,7 +218,8 @@ function buildSnapshot(repo, commit) {
         return isVariant(doc) ? [{ rel, doc, body: bodies.get(rel) }] : [];
       });
     dirs.set(name, { meta, metaRel: bodies.has(metaRel) ? metaRel : null, variants });
-    if (!isV2(meta) || !variants.length) continue;
+    // dirs keeps it either way. The index does not, once it has no variants.
+    if (!isV2(meta) || variants.length === 0) continue;
 
     // Perf reports, linked by file name. model-catalog's validate:schema
     // checks they are documents a reader can open; this serves what is there.

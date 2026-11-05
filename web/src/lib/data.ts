@@ -1,5 +1,6 @@
-import type { Catalog, History, Index, Variant } from "@/types";
-import { catalogOf, encodePath } from "./catalog";
+import type { Catalog, History, Index, Model, Variant } from "@/types";
+import { catalogOf, encodePath, modelFromMetadata } from "./catalog";
+import { metadataApi } from "./edit";
 
 // Every fetch is from a catalog's root (Host.base): the site's own, or the one
 // a <model-catalog> element names. One page may show several.
@@ -25,6 +26,19 @@ export function loadCatalog(base: string): Promise<Catalog> {
     catalogs.set(base, catalog);
   }
   return catalog;
+}
+
+// A model the index omits (it has no variants), from GET .../metadata. Null
+// when this catalog has no API, or no such model: a static site stays a 404.
+export async function loadUnlistedModel(base: string, name: string): Promise<Model | null> {
+  let res: Response;
+  try {
+    res = await fetch(base + metadataApi(name), { cache: "no-store" });
+  } catch {
+    return null;
+  }
+  if (!res.ok) return null;
+  return modelFromMetadata(name, await res.text());
 }
 
 // A variant's published file, its configuration as a model page shows it;

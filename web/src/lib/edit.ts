@@ -97,6 +97,7 @@ export function onTokens(f: () => void) {
 // The API's paths, under the catalog's root.
 export const variantApi = (model: string, id: string) => `api/v2/models/${encodeURIComponent(model)}/variants/${encodeURIComponent(id)}`;
 export const metadataApi = (model: string) => `api/v2/models/${encodeURIComponent(model)}/metadata`;
+export const modelApi = (model: string) => `api/v2/models/${encodeURIComponent(model)}`;
 export const modelsApi = "api/v2/models";
 // catalog.yaml: where the catalog is served (site, raw) and its repository.
 export const settingsApi = "api/v2/catalog";

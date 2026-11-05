@@ -230,8 +230,8 @@ function variantProblems(v, at) {
 
 // What the schema cannot see, per model: it lives in models/<name>/, named
 // after metadata.yaml's name -- the index gives a perf report as a bare file
-// name, and consumers fetch it from models/<name>/<report> -- and it has
-// something to serve.
+// name, and consumers fetch it from models/<name>/<report>. A v1 model is
+// its version files. A v2 model may have no variant files; index-v2.json then omits it.
 for (const name of modelNames()) {
   const dir = path.join(modelsDir, name);
   const meta = doc(path.join(dir, "metadata.yaml"));
@@ -250,10 +250,8 @@ for (const name of modelNames()) {
         `convert it first (node hack/migrate-v2.js ${name}), which makes metadata.yaml v2`,
     ]);
   }
-  if (v2 ? variants.length === 0 : versions.length === 0) {
-    fail(path.relative(root, dir), [
-      v2 ? "no variant files: add one, or remove the directory" : "no version files: publish one, or remove the directory",
-    ]);
+  if (!v2 && versions.length === 0) {
+    fail(path.relative(root, dir), ["no version files: publish one, or remove the directory"]);
     continue;
   }
   for (const rel of versions) {
@@ -291,7 +289,9 @@ for (const name of modelNames()) {
     if (lines.length > 0) fail(rel, lines);
     ids.add(d.id);
   }
-  if (meta?.defaultVariant !== undefined && !ids.has(meta.defaultVariant)) {
+  // With no variants, defaultVariant may name the one just deleted. While any
+  // remain, it must name one of them.
+  if (variants.length > 0 && meta?.defaultVariant !== undefined && !ids.has(meta.defaultVariant)) {
     fail(`models/${name}/metadata.yaml`, [`defaultVariant: ${JSON.stringify(meta.defaultVariant)} is not a variant of this model`]);
   }
 }

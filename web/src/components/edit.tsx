@@ -1,9 +1,9 @@
 // Editing the catalog, where its server takes writes (lib/edit.ts): a
 // variant's file and a model's metadata.yaml edited in place, a new variant
-// or model, a variant deleted. Each is a dialog over the page that checks the
-// change with the server (a dry run) before committing it, and the page shows
-// the catalog as the commit left it. None of it shows on a read-only catalog,
-// or in an element marked readonly.
+// or model, a variant deleted or the model itself. Each is a dialog over the
+// page that checks the change with the server (a dry run) before committing
+// it, and the page shows the catalog as the commit left it. None of it shows
+// on a read-only catalog, or in an element marked readonly.
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { useNavigate, useRevalidator } from "react-router";
 import type { Model, Variant } from "@/types";
@@ -15,6 +15,7 @@ import {
   loadCapabilities,
   loadInit,
   metadataApi,
+  modelApi,
   modelsApi,
   onTokens,
   readFile,
@@ -606,6 +607,111 @@ export function DeleteVariant({ m, v }: { m: Model; v: Variant }) {
             type="button"
             className="border-destructive text-destructive hover:border-destructive hover:text-destructive"
             disabled={!token || busy}
+            onClick={remove}
+          >
+            {busy ? "Deleting…" : "Delete"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// A model deleted, once confirmed, and only when it has no variants: delete
+// those first. metadata.yaml's digest is read when this opens, so a change
+// made while it is open is a conflict. Histories stay, and so does every
+// revision a deploy may be pinned to.
+export function DeleteModel({ m }: { m: Model }) {
+  const { base } = useHost();
+  const token = useToken(base);
+  const reload = useReload();
+  const navigate = useNavigate();
+  const api = modelApi(m.name);
+  const blocked = m.variants.length > 0;
+  const [open, setOpen] = useState(false);
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [outcome, setOutcome] = useState<Outcome>(null);
+  // metadata.yaml's digest, from when this opened. If-Match is that, so a
+  // change made while the dialog is open is a conflict. Null until the read lands.
+  const [etag, setEtag] = useState<string | null>(null);
+  useEffect(() => {
+    if (open) {
+      setOutcome(null);
+      setMessage("");
+      setEtag(null);
+      let live = true;
+      readFile(base, metadataApi(m.name)).then(
+        (got) => {
+          if (live) setEtag(got.etag);
+        },
+        (err: Error) => {
+          if (live) setOutcome({ kind: "failed", err: err instanceof WriteError ? err : new WriteError(0, err.message) });
+        },
+      );
+      return () => {
+        live = false;
+      };
+    }
+  }, [open, base, m.name]);
+  const remove = async () => {
+    if (!etag || blocked) return;
+    setBusy(true);
+    setOutcome(null);
+    try {
+      await write(base, { method: "DELETE", api, etag, message });
+      // The model's page is gone. The models list loads the catalog again.
+      forgetCatalog(base);
+      setOpen(false);
+      navigate("/models.html");
+    } catch (err) {
+      setOutcome({ kind: "failed", err: err instanceof WriteError ? err : new WriteError(0, (err as Error).message) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog
+      open={blocked ? false : open}
+      onOpenChange={(next) => {
+        if (!blocked) setOpen(next);
+      }}
+    >
+      <span className="inline-flex flex-wrap items-center gap-2" title={blocked ? "Delete the variants first" : undefined}>
+        <DialogTrigger asChild>
+          <Button title={blocked ? "Delete the variants first" : `Delete ${m.name}`} disabled={blocked}>
+            {icons.remove}Delete model
+          </Button>
+        </DialogTrigger>
+        {blocked && <span className="text-[0.8rem] text-muted-foreground">Delete the variants first</span>}
+      </span>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>
+            Delete <span className="font-mono">{m.name}</span>?
+          </DialogTitle>
+          <DialogDescription>
+            The model leaves the catalog: its <code>metadata.yaml</code> and any other file left under <code>models/{m.name}/</code>. Each recipe's
+            history stays, and a deploy pinned to one of its versions still finds it. To steer people off it instead, edit it and set{" "}
+            <code>deprecated</code>.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid min-h-0 flex-1 gap-3 overflow-y-auto px-5 py-4">
+          <OutcomeNote outcome={outcome} onReload={() => reload().then(() => setOpen(false))} />
+          <TokenForm refused={outcome?.kind === "failed" && outcome.err.status === 401} />
+        </div>
+        <div className="flex flex-wrap items-center gap-2 border-t border-border px-5 py-3">
+          <Input
+            aria-label="Commit message"
+            placeholder="Commit message (optional)"
+            className="min-h-0 flex-[1_1_16rem] py-[0.35rem] text-[0.84rem]"
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+          />
+          <Button
+            type="button"
+            className="border-destructive text-destructive hover:border-destructive hover:text-destructive"
+            disabled={!token || busy || !etag}
             onClick={remove}
           >
             {busy ? "Deleting…" : "Delete"}

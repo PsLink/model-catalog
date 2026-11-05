@@ -156,8 +156,8 @@ function variantOf(index: Index, m: IndexModel, v: IndexVariant, tuning: Tuning[
     history: v.history,
     servedName: v.servedName || null,
     engine: v.engine,
-    // The first variant when metadata.yaml names none.
-    default: v.id === (m.defaultVariant ?? m.variants[0].id),
+    // The first variant when metadata.yaml names none. A model may have none.
+    default: v.id === (m.defaultVariant ?? m.variants[0]?.id),
     description: v.description || null,
     link: v.link && /^https?:\/\//i.test(v.link) ? v.link : null,
     chart: v.chart || null,
@@ -195,6 +195,37 @@ export function catalogOf(index: Index): Catalog {
     };
   });
   return { repo: index.repo || null, count: models.length, models };
+}
+
+// A top-level `field: value` on its own line. The page has no YAML parser;
+// apiVersion, name and displayName are written this way.
+function lineScalar(text: string, field: string): string | null {
+  const m = new RegExp(`^${field}:[ \\t]*(?:"([^"]*)"|'([^']*)'|([^#\\n]*?))[ \\t]*(?:#.*)?$`, "m").exec(text);
+  if (!m) return null;
+  const value = m[1] ?? m[2] ?? m[3];
+  return value === "" ? null : value;
+}
+
+// A model index-v2.json omits, because it has no variants, read from its
+// metadata.yaml so the page can still show it and offer Delete model. Only
+// the name and title are read; the rest of the page is empty. Null when the
+// text is not that model's v2 metadata.
+export function modelFromMetadata(name: string, text: string): Model | null {
+  if (lineScalar(text, "apiVersion") !== "catalog.swiss/v2" || lineScalar(text, "name") !== name) return null;
+  return {
+    name,
+    displayName: lineScalar(text, "displayName") || name,
+    description: null,
+    family: null,
+    tags: [],
+    deprecated: false,
+    deprecatedReason: null,
+    source: null,
+    variants: [],
+    reports: [],
+    comparison: null,
+    tuning: [],
+  };
 }
 
 // The pairs shown on an optimized variant: those of the newest version of it
