@@ -1,8 +1,8 @@
 apiVersion: catalog.swiss/v2
 name: google-gemma-4-31b-it
-displayName: google/gemma-4-31B-it
+displayName: gemma-4-31B-it
 description: google/gemma-4-31B-it on 4 H100 GPUs. Configs use NEXTN speculative decoding.
-family: google
+family: gemma
 tags:
   - chat
   - reasoning
