@@ -90,6 +90,6 @@ values:
     failureThreshold: 3
   securityContext:
     privileged: true
-  promptTokensDetails: false
+  promptTokensDetails: true
   progressDeadlineSeconds: 7200
   terminationGracePeriodSeconds: 1200

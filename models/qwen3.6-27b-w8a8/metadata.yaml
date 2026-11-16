@@ -15,9 +15,9 @@ origins:
 source:
   hf: Eco-Tech/Qwen3.6-27B-w8a8
 tuning:
-- baseline: vllm-tp2-ascend-910b4-1-baseline@1.0.0
+- baseline: vllm-tp2-ascend-910b4-1-baseline@1.1.3
   optimized: vllm-tp2-dp2-ascend-910b4-1-optimized@1.0.0
-  uplift: -3.4
+  uplift: 4.9
   workloads:
   - name: 50k + 1.5k
     uplift: 2.1

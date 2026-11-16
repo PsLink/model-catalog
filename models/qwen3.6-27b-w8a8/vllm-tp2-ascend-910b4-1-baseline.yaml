@@ -3,9 +3,9 @@ apiVersion: catalog.swiss/v2
 kind: Variant
 model: qwen3.6-27b-w8a8
 id: vllm-tp2-ascend-910b4-1-baseline
-version: 1.0.0
+version: 1.1.3
 servedName: qwen3.6-27b
-description: 'Baseline: TP2 on two ASCEND-910B4-1 GPUs, single node, ascend weights.'
+description: 'Baseline: TP2 on two ASCEND-910B4-1 cards, single node, ascend weights.'
 engine: vllm
 chart:
   name: vllm
@@ -51,7 +51,6 @@ values:
     - --enable-prefix-caching
     - --enable-auto-tool-choice
     - --tool-call-parser=qwen3_coder
-    - --enable-prompt-tokens-details
   lifecycle:
     shutdownTimeout: 0
   resources:
