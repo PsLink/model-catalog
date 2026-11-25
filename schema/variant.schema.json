@@ -6,6 +6,7 @@
   "type": "object",
   "additionalProperties": false,
   "required": ["apiVersion", "kind", "model", "id", "version", "engine", "chart", "requires"],
+  "allOf": [{ "$ref": "version.schema.json#/$defs/engineChart" }],
   "properties": {
     "apiVersion": {
       "const": "catalog.swiss/v2"
@@ -47,6 +48,9 @@
     },
     "requires": {
       "$ref": "version.schema.json#/$defs/variant/properties/requires"
+    },
+    "inputs": {
+      "$ref": "version.schema.json#/$defs/variant/properties/inputs"
     },
     "values": {
       "$ref": "version.schema.json#/$defs/variant/properties/values"

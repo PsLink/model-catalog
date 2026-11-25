@@ -21,6 +21,19 @@
 //   GET    api/v2/models/<name>/metadata       metadata.yaml, its digest as ETag
 //   PUT    api/v2/models/<name>/metadata       (If-Match: <digest>)
 //   POST   api/v2/models                       a new model: {metadata, variants}
+//   DELETE api/v2/models/<name>                every file under models/<name>/,
+//                                              once no models/<name>/*.yaml
+//                                              other than metadata.yaml remains
+//                                              except a v1 version file
+//                                              (apiVersion catalog.swiss/v1, no
+//                                              kind). If-Match is metadata.yaml's
+//                                              digest. 422 names any other,
+//                                              including one that does not parse
+//                                              and one that parses as neither a
+//                                              v1 version nor a variant. With
+//                                              none, it is left out of
+//                                              index-v2.json; GET metadata and
+//                                              this call still reach it.
 //   GET    api/v2/                             what this server takes: the web
 //                                              app turns editing on by it
 //   GET    api/v2/catalog                      catalog.yaml, its digest as ETag
@@ -50,6 +63,7 @@ const {
   putVariant,
   deleteVariant,
   putMetadata,
+  deleteModel,
   createModel,
   tag,
 } = require("./writes");
@@ -251,9 +265,11 @@ function createServer({ store, tokens = null, base = "/", pages = null, template
             ? deleteVariant
             : req.method === "PUT" && which === "metadata"
               ? putMetadata
-              : req.method === "POST" && !model
-                ? createModel
-                : null;
+              : req.method === "DELETE" && model && !which
+                ? deleteModel
+                : req.method === "POST" && !model
+                  ? createModel
+                  : null;
       if (!op) return send(405, "text/plain; charset=utf-8", "not a method this path takes\n");
       const author = authorOf();
       if (!author) return unauthorized();
@@ -370,13 +386,20 @@ function createServer({ store, tokens = null, base = "/", pages = null, template
 function describe({ commit, plan, snapshot }, { dryRun }) {
   const out = { commit, ...(dryRun && { dryRun: true }), ...(plan.unchanged && { unchanged: true }), path: plan.rel };
   const [, model, file] = plan.rel.split("/");
+  // A model with no variants is not in the index. Replacing its metadata still
+  // names it here; deleting its last variant is the file being gone.
   const m = snapshot.index.models.find((x) => x.name === (plan.model ?? model));
   const v = m?.variants.find((x) => x.path === plan.rel);
   if (v) Object.assign(out, { model: m.name, id: v.id, version: v.version, digest: v.digest, releaseDate: v.releaseDate, history: v.history });
   else if (file === "metadata.yaml") {
     const oid = snapshot.tree.get(plan.rel);
-    Object.assign(out, { model: plan.model ?? model, digest: oid && digest(snapshot.blob(oid)) });
-    if (m && plan.created) out.variants = m.variants.map(({ id, version, digest: d, path: p }) => ({ id, version, digest: d, path: p }));
+    const name = plan.model ?? model;
+    // Gone with the model: no digest, and it is not in the index.
+    if (!oid) Object.assign(out, { model: name, deleted: true });
+    else {
+      Object.assign(out, { model: name, digest: digest(snapshot.blob(oid)) });
+      if (m && plan.created) out.variants = m.variants.map(({ id, version, digest: d, path: p }) => ({ id, version, digest: d, path: p }));
+    }
   } else out.deleted = true;
   return out;
 }

@@ -100,6 +100,34 @@ test("index-v2 lists only v2 models, each variant file at its latest version", (
   assert.deepEqual(revisionProblems({ root: repo.dir, since: repo.sha(3) }), []);
 });
 
+test("a v2 model with no variants is left out of index-v2 and not in the v1 index", () => {
+  const repo = fixture([
+    [
+      "2026-10-01T10:00:00Z",
+      "init",
+      {
+        ...catalogFiles,
+        "models/bare/metadata.yaml": { apiVersion: "catalog.swiss/v2", name: "bare", displayName: "Bare", defaultVariant: "gone" },
+      },
+    ],
+  ]);
+  const built = buildIndexV2({ root: repo.dir, warn: () => {} });
+  assert.deepEqual(checkIndexV2(built), []);
+  assert.equal(
+    built.index.models.find((m) => m.name === "bare"),
+    undefined,
+  );
+  assert.deepEqual(
+    built.index.models.map((m) => m.name),
+    ["m2"],
+  );
+  assert.equal(built.index.count, 1);
+  assert.deepEqual(
+    buildIndex({ root: repo.dir }).models.map((m) => m.name),
+    ["m1"],
+  );
+});
+
 test("a change must raise the version, and a raised version must change something", () => {
   const repo = fixture([["2026-10-01T10:00:00Z", "init", catalogFiles]]);
   const since = repo.head();

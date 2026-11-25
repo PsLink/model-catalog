@@ -69,7 +69,7 @@ tags:
       A model's variant files: `models/<model>/<id>.yaml`. catalog-server only. Reads need no token;
       every write does, and must name the digest it read (`If-Match`).
   - name: Models
-    description: A model's `metadata.yaml`, and new models. catalog-server only.
+    description: A model's `metadata.yaml`, new models, and deleting a model. catalog-server only.
   - name: Settings
     description: "`catalog.yaml`: where the catalog is served (`site`, `raw`) and its repository (`repo`). catalog-server only."
   - name: Setup
@@ -93,8 +93,9 @@ paths:
       operationId: getIndexV2
       summary: The catalog
       description: |
-        The v2 models and their variant files, without the variants' values. What the web app
-        renders from and swiss reads with `schemaVersion: v2`. Schema: `schema/index-v2.schema.json`.
+        The v2 models that have variant files, without the variants' values. A model with none is
+        omitted: a consumer rejects the whole index when any model has an empty variants list. What the
+        web app renders from and swiss reads with `schemaVersion: v2`. Schema: `schema/index-v2.schema.json`.
 
         server/ builds it from the checkout and git history, and again after an edit under
         `models/` or a new commit; it answers `500` when the result fails its checks. catalog-server
@@ -396,7 +397,8 @@ paths:
         byte for byte. It must be `catalog.swiss/v2` `kind: Variant`, its `model` and `id` this
         path's, in a v2 model, and its `version` semver above the variant's last revision -- a deleted
         one's included -- while changing more than the version. The same bytes again (a retry) are
-        `200` and commit nothing.
+        `200` and commit nothing. Refused (`422`) when the model's `defaultVariant` would then name
+        no variant it has: with any variant, `defaultVariant` must name one of them.
 
         What is not checked: the variant's JSON schema, chart values, images (model-catalog's
         `validate`).
@@ -447,8 +449,10 @@ paths:
       operationId: deleteVariant
       summary: Delete a variant file
       description: |
-        Refused (`422`) while the model's `defaultVariant` or a `tuning` entry names it, or when it is
-        the model's last variant. Its history stays, and `raw/` keeps serving its revisions.
+        Refused (`422`) while a `tuning` entry names it, or while another variant remains and this one is
+        the model's `defaultVariant` (name another first). The last variant may be that default: deleting
+        it leaves `metadata.yaml`, which may still name it. That name is allowed only while the model has
+        no variants. Its history stays, and `raw/` keeps serving its revisions.
       x-served-by: [catalog-server]
       security:
         - bearer: []
@@ -509,7 +513,7 @@ paths:
       tags: [Models]
       operationId: putMetadata
       summary: Replace a model's metadata.yaml
-      description: Its `apiVersion` must be `catalog.swiss/v2`, its `name` the model's directory, and its `defaultVariant`, when set, one of its variants.
+      description: Its `apiVersion` must be `catalog.swiss/v2` and its `name` the model's directory. Its `defaultVariant`, when set, must be one of its variants while it has any. With no variants, `defaultVariant` may name one that is gone.
       x-served-by: [catalog-server]
       security:
         - bearer: []
@@ -543,6 +547,55 @@ paths:
           $ref: "#/components/responses/PreconditionFailed"
         "413":
           $ref: "#/components/responses/TooLarge"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "428":
+          $ref: "#/components/responses/PreconditionRequired"
+        "503":
+          $ref: "#/components/responses/Unavailable"
+
+  /api/v2/models/{model}:
+    parameters:
+      - $ref: "#/components/parameters/Model"
+    delete:
+      tags: [Models]
+      operationId: deleteModel
+      summary: Delete a model
+      description: |
+        Deletes every tracked file under `models/{model}/`, in one commit. Refused (`422`) while any
+        `models/{model}/*.yaml` other than `metadata.yaml` remains, unless that file parses as a v1 version
+        (`apiVersion: catalog.swiss/v1` and no `kind`): a variant, YAML that does not parse, or YAML that
+        parses as neither. `problems` names each and says to delete them first. A v1 version file, and
+        non-yaml leftovers such as perf reports, are removed with the model. With none of those YAML files
+        left, the model is omitted from `index-v2.json`; `GET .../metadata` and this call still reach it.
+        `If-Match` is `metadata.yaml`'s digest: missing is `428`, a mismatch is `412`, and `*` matches as
+        on the other writes. No such model is `404`. Each variant's history stays, and `raw/` keeps
+        serving its revisions.
+      x-served-by: [catalog-server]
+      security:
+        - bearer: []
+      parameters:
+        - $ref: "#/components/parameters/IfMatchRequired"
+        - $ref: "#/components/parameters/DryRun"
+        - $ref: "#/components/parameters/Message"
+        - $ref: "#/components/parameters/CommitMessage"
+      responses:
+        "200":
+          $ref: "#/components/responses/Written"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/WritesOff"
+        "404":
+          description: No such model.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "412":
+          $ref: "#/components/responses/PreconditionFailed"
         "422":
           $ref: "#/components/responses/Unprocessable"
         "428":
@@ -805,7 +858,7 @@ components:
     CommitMessage:
       name: X-Commit-Message
       in: header
-      description: "The commit's message. Default: `<model>/<id>: <version>`, `<model>/<id>: delete`, `<model>: metadata`, `<model>: add model`, `catalog: settings`, or `Initialize the catalog`."
+      description: "The commit's message. Default: `<model>/<id>: <version>`, `<model>/<id>: delete`, `<model>: delete`, `<model>: metadata`, `<model>: add model`, `catalog: settings`, or `Initialize the catalog`."
       schema:
         type: string
 
@@ -1066,6 +1119,7 @@ components:
           items:
             $ref: "#/components/schemas/Tuning"
         variants:
+          description: One per variant file, by id.
           type: array
           minItems: 1
           items:
@@ -1354,6 +1408,7 @@ components:
         deprecated:
           $ref: "#/components/schemas/Deprecated"
         defaultVariant:
+          description: While the model has variants, one of them. With none, it may name a variant that is gone.
           type: string
         tuning:
           type: array

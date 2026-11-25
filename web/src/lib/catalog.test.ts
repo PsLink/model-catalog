@@ -1,7 +1,19 @@
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { Index, Model, Tuning, Variant } from "../types";
-import { catalogOf, hardwareLabels, hardwareShort, measuredAs, orderedVariants, reportLinks, topologyLabel, tuningFor, variantBest } from "./catalog";
-import { computeSummary, sorter, variantFacetsOf, type Facet } from "./facets";
+import {
+  catalogOf,
+  hardwareLabels,
+  hardwareShort,
+  measuredAs,
+  modelFromMetadata,
+  orderedVariants,
+  reportLinks,
+  topologyLabel,
+  tuningFor,
+  variantBest,
+} from "./catalog";
+import { loadUnlistedModel } from "./data";
+import { computeSummary, facetsOf, sorter, variantFacetsOf, type Facet } from "./facets";
 import { compareVersions } from "./versions";
 
 const variant = (id: string, over: Partial<Variant> = {}): Variant => ({
@@ -167,6 +179,16 @@ describe("index-v2.json", () => {
     expect(catalogOf(index({ defaultVariant: "fast" })).models[0].variants.find((v) => v.default)?.id).toBe("fast");
   });
 
+  test("a model with no variants still derives, though the index omits one", () => {
+    const [m] = catalogOf(index({ variants: [] })).models;
+    expect(m.variants).toEqual([]);
+    expect(m.comparison).toBeNull();
+    expect(orderedVariants(m)).toEqual([]);
+    expect(reportLinks(m, "Perf report").map((r) => r.text)).toEqual(["Perf report"]);
+    expect(facetsOf(m)).toMatchObject({ engines: [], hardware: [], topology: [], hasCmp: false, uplift: null });
+    expect(computeSummary([facetsOf(m)])).toMatchObject({ models: 1, variants: 0, pairs: 0 });
+  });
+
   test("tuning names the variant versions measured; the model shows the pair measured on the current one", () => {
     const [m] = catalogOf(index()).models;
     expect(m.tuning.map((t) => [t.optimizedId, t.optimizedVersion, t.baselineId, t.baselineVersion])).toEqual([
@@ -191,6 +213,69 @@ describe("index-v2.json", () => {
   test("hardware labels: pd shows the card, not a count", () => {
     expect(hardwareShort({ gpus: 1, topology: "pd", gpuProduct: ["NVIDIA-RTX-6000D"] })).toBe("RTX-6000D");
     expect(hardwareShort({ gpus: 1, topology: "pd" })).toBe("any GPU");
+  });
+});
+
+const bareMetadata = `apiVersion: catalog.swiss/v2
+name: bare
+displayName: Bare
+description: Nothing deployed.
+family: mock
+tags:
+  - chat
+  - test
+deprecated: gone
+source:
+  hf: o/bare
+  revision: abc
+defaultVariant: gone
+`;
+
+describe("a model the index omits", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  test("its metadata.yaml is enough for the page that deletes it", () => {
+    expect(modelFromMetadata("bare", bareMetadata)).toEqual({
+      name: "bare",
+      displayName: "Bare",
+      description: null,
+      family: null,
+      tags: [],
+      deprecated: false,
+      deprecatedReason: null,
+      source: null,
+      variants: [],
+      reports: [],
+      comparison: null,
+      tuning: [],
+    });
+    expect(modelFromMetadata("other", bareMetadata)).toBeNull();
+    expect(modelFromMetadata("bare", bareMetadata.replace("catalog.swiss/v2", "catalog.swiss/v1"))).toBeNull();
+  });
+
+  test("the page reads it from the API when the index has no entry", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        expect(url).toBe("https://c.example/api/v2/models/bare/metadata");
+        return new Response(bareMetadata, { status: 200, headers: { "Content-Type": "application/yaml" } });
+      }),
+    );
+    expect(await loadUnlistedModel("https://c.example/", "bare")).toMatchObject({ name: "bare", displayName: "Bare", variants: [] });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("no", { status: 404 })),
+    );
+    expect(await loadUnlistedModel("https://c.example/", "bare")).toBeNull();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("offline");
+      }),
+    );
+    expect(await loadUnlistedModel("https://d.example/", "bare")).toBeNull();
   });
 });
 

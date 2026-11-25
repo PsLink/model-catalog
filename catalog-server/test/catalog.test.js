@@ -58,6 +58,38 @@ test("index-v2.json has the v2 models, each variant at its last change", () => {
   }
 });
 
+test("a v2 model with no variants is left out of the index and still known to the catalog", () => {
+  const repo = catalogRepo([
+    [
+      "2026-10-01T10:00:00Z",
+      "init",
+      {
+        ...catalogFiles,
+        "models/bare/metadata.yaml": { apiVersion: "catalog.swiss/v2", name: "bare", displayName: "Bare", defaultVariant: "gone" },
+      },
+    ],
+  ]);
+  try {
+    const { index, dirs } = snapshotOf(repo);
+    assert.equal(
+      index.models.find((m) => m.name === "bare"),
+      undefined,
+    );
+    assert.deepEqual(
+      index.models.map((m) => m.name),
+      ["m2"],
+    );
+    assert.equal(index.count, 1);
+    const bare = dirs.get("bare");
+    assert.equal(bare.meta.displayName, "Bare");
+    assert.equal(bare.meta.defaultVariant, "gone");
+    assert.equal(bare.metaRel, "models/bare/metadata.yaml");
+    assert.deepEqual(bare.variants, []);
+  } finally {
+    repo.rm();
+  }
+});
+
 test("catalog.yaml says where the catalog is served and its old revisions fetched", () => {
   const settings = {
     apiVersion: "catalog.swiss/v1",

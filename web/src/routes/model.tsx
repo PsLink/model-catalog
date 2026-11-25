@@ -13,7 +13,7 @@ import {
 } from "react-router";
 import type { Model, Tuning, Variant } from "@/types";
 import { anchorOf, encodePath, orderedVariants, reportLinks, REPORT_LANG, tuningFor, UPLIFT_HELP, WORKLOAD_NAMES } from "@/lib/catalog";
-import { catalogLoaded, loadCatalog, loadVariantText } from "@/lib/data";
+import { catalogLoaded, loadCatalog, loadUnlistedModel, loadVariantText } from "@/lib/data";
 import { useHost, useTitle } from "@/lib/host";
 import { countBy } from "@/lib/facets";
 import { tagHue } from "@/lib/hues";
@@ -36,7 +36,7 @@ import {
   VariantBadges,
 } from "@/components/catalog";
 import { VariantHistory } from "@/components/history";
-import { DeleteVariant, EditMetadata, EditVariant, NewVariant, useEditable } from "@/components/edit";
+import { DeleteModel, DeleteVariant, EditMetadata, EditVariant, NewVariant, useEditable } from "@/components/edit";
 import { icons } from "@/components/icons";
 import { SiteFooter, SiteHeader } from "@/components/site";
 
@@ -44,11 +44,20 @@ export const modelLoader =
   (base: string) =>
   async ({ params }: LoaderFunctionArgs) => {
     const catalog = await loadCatalog(base);
-    const m = catalog.models.find((x) => x.name === params.dir);
+    // index-v2.json omits a model with no variants. After its last recipe is
+    // deleted the page stays, reading metadata.yaml from the API, so Delete
+    // model is still offered. A catalog with no API answers 404.
+    const listed = catalog.models.find((x) => x.name === params.dir);
+    const m = listed ?? (params.dir ? await loadUnlistedModel(base, params.dir) : null);
     if (!m) throw new Response(`No model ${params.dir} in this catalog.`, { status: 404 });
     // Each variant's configuration is its own file.
     const texts = await Promise.all(m.variants.map((v) => loadVariantText(base, v)));
-    return { m, repo: catalog.repo, yaml: Object.fromEntries(m.variants.map((v, i) => [v.id, texts[i]])) as Record<string, string | null> };
+    return {
+      m,
+      repo: catalog.repo,
+      unlisted: !listed,
+      yaml: Object.fromEntries(m.variants.map((v, i) => [v.id, texts[i]])) as Record<string, string | null>,
+    };
   };
 
 // The GPU filter only changes the query: the model and its files stay, until
@@ -280,7 +289,7 @@ function Facts({ items }: { items: ReactNode[] }) {
 }
 
 export function ModelRoute() {
-  const { m, repo, yaml } = useLoaderData() as Awaited<ReturnType<ReturnType<typeof modelLoader>>>;
+  const { m, repo, yaml, unlisted } = useLoaderData() as Awaited<ReturnType<ReturnType<typeof modelLoader>>>;
   const variants = orderedVariants(m);
   const { hash } = useLocation();
   const navigate = useNavigate();
@@ -370,6 +379,7 @@ export function ModelRoute() {
           <div className="flex flex-wrap justify-center gap-2">
             <NewVariant m={m} from={newFrom(m, yaml)} />
             <EditMetadata m={m} />
+            <DeleteModel m={m} />
           </div>
         )}
         {reports.length > 0 && (
@@ -404,6 +414,12 @@ export function ModelRoute() {
             </div>
           )}
           <div className="grid gap-[0.85rem]">
+            {total === 0 && (
+              <p className="text-[0.9rem] text-muted-foreground">
+                No recipes.
+                {unlisted && " It is left out of the catalog until it has one."}
+              </p>
+            )}
             {variants.filter(shows).map((v) => (
               <VariantDetail
                 key={v.id}

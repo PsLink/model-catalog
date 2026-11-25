@@ -15,11 +15,11 @@ Writes are on. Set an empty catalog up from the web app ("Set up this catalog"),
 Writes are off: set tokens.existingSecret or tokens.entries to edit the catalog.
 {{- end }}
 
-Point swiss at it in the site profile:
+Point swiss at it in the site profile, by its service: swissd runs in the cluster.
 
   catalogs:
     - name: internal
-      url: {{ $public }}
+      url: {{ include "catalog-server.url" . }}
       schemaVersion: v2
 
 Check it:  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}

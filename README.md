@@ -99,6 +99,7 @@ What a variant needs to know:
 | `image` | on a public registry, pullable without a login |
 | `chart.version` | exact (`0.8.0`) or a [semver range](https://github.com/Masterminds/semver#checking-version-constraints), quoted (`">=0.8.0"`, `"^0.8.0"`). A new or changed variant's must resolve to a release at or above the chart's minimum in `schema/crds/config.json` |
 | `values` | chart values. Site-specific keys (namespace, host paths, registry, route ConfigMaps) are refused by the schema |
+| `inputs` | chart values each deploy answers. `key` is a [kyaml-style path](https://github.com/modelsphere/modelsphere/issues/75): fields joined by `.`, plus `[field=value]`, `[=value]`, `[^=prefix]` and bare list indexes (`volumes.[name=draft-model].hostPath.path`); a key that goes through a list must select exactly one string, number or boolean in `values`. Optional `patcher` (string inputs) is a template with one `{value}`, e.g. `"--speculative-draft-model-path={value}"` |
 | `deprecated` | `true` or a reason: the variant is on its way out |
 | `replaces` | the id of a variant this one renames or supersedes |
 
@@ -167,5 +168,6 @@ Needs Node.js 24, and a full git clone (`fetch-depth: 0` in CI): versions, relea
 
 - **Backend and frontend, one GitHub Pages site.**
 - **`index-v2.json` is generated, not committed** (`schema/index-v2.schema.json`). It is a function of `models/`,
-  `catalog.yaml` and their git history, with no timestamp, so the same commit gives the same catalog.
+  `catalog.yaml` and their git history, with no timestamp, so the same commit gives the same catalog. A v2 model
+  with no variant files is omitted.
 - **`history.json` is generated too**: `models/<name>/<id>.history.json`, every revision of a variant file, newest first.

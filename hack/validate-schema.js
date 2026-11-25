@@ -27,6 +27,7 @@ const {
   checkIndexV2,
 } = require("./lib/catalog");
 const { reportProblem } = require("./lib/report");
+const { variantProblems } = require("./lib/variant-rules");
 const { paint, marks, plural } = require("./lib/style");
 
 const {
@@ -203,35 +204,10 @@ for (const file of versionFilePaths) {
   }
 }
 
-// An LWS group that disagrees with requires.nodes hangs at rendezvous.
-function variantProblems(v, at) {
-  const lines = [];
-  const lws = v?.values?.lws;
-  if (lws?.enabled === true && lws.size !== v?.requires?.nodes) {
-    lines.push(`${at}values.lws.size ${lws.size} is not requires.nodes ${v?.requires?.nodes}`);
-  }
-  // A mock has no chart of its own: it runs on an engine's chart (the schema limits chart.name to those).
-  if (v?.chart?.name && v?.engine && v.engine !== "mock" && v.chart.name !== v.engine) {
-    lines.push(`${at}chart.name ${v.chart.name} is not its engine, ${v.engine}`);
-  }
-  // The chart renders what values enable, not what topology says.
-  const topology = v?.requires?.topology;
-  if (["lws", "pd"].includes(topology) && v?.values?.[topology]?.enabled !== true) {
-    lines.push(`${at}requires.topology ${topology} needs values.${topology}.enabled: true`);
-  }
-  // CPU only: no accelerator, so nothing that picks or sizes one.
-  if (v?.requires?.gpus === 0) {
-    for (const key of ["vendor", "gpuProduct", "minGpuMemoryGiB", "rdma"]) {
-      if (v.requires[key] !== undefined) lines.push(`${at}requires.${key} is set, but requires.gpus 0 is CPU only`);
-    }
-  }
-  return lines;
-}
-
 // What the schema cannot see, per model: it lives in models/<name>/, named
 // after metadata.yaml's name -- the index gives a perf report as a bare file
-// name, and consumers fetch it from models/<name>/<report> -- and it has
-// something to serve.
+// name, and consumers fetch it from models/<name>/<report>. A v1 model is
+// its version files. A v2 model may have no variant files; index-v2.json then omits it.
 for (const name of modelNames()) {
   const dir = path.join(modelsDir, name);
   const meta = doc(path.join(dir, "metadata.yaml"));
@@ -250,10 +226,8 @@ for (const name of modelNames()) {
         `convert it first (node hack/migrate-v2.js ${name}), which makes metadata.yaml v2`,
     ]);
   }
-  if (v2 ? variants.length === 0 : versions.length === 0) {
-    fail(path.relative(root, dir), [
-      v2 ? "no variant files: add one, or remove the directory" : "no version files: publish one, or remove the directory",
-    ]);
+  if (!v2 && versions.length === 0) {
+    fail(path.relative(root, dir), ["no version files: publish one, or remove the directory"]);
     continue;
   }
   for (const rel of versions) {
@@ -291,7 +265,9 @@ for (const name of modelNames()) {
     if (lines.length > 0) fail(rel, lines);
     ids.add(d.id);
   }
-  if (meta?.defaultVariant !== undefined && !ids.has(meta.defaultVariant)) {
+  // With no variants, defaultVariant may name the one just deleted. While any
+  // remain, it must name one of them.
+  if (variants.length > 0 && meta?.defaultVariant !== undefined && !ids.has(meta.defaultVariant)) {
     fail(`models/${name}/metadata.yaml`, [`defaultVariant: ${JSON.stringify(meta.defaultVariant)} is not a variant of this model`]);
   }
 }
@@ -567,6 +543,22 @@ function baseChecks(mergeBase) {
       else if (s === "M") fail(rel, [`schema v1 is read-only: a published version file never changes; ${instead}`]);
       else fail(rel, ["schema v1 is read-only: index.json serves this version, and deploys pin it; keep the file"]);
     }
+  }
+
+  // commandOverride takes the container's command over from the chart: no
+  // --model, none of the flags the chart wires, and the chart refuses
+  // extraArgs beside it, so a deploy that passes extraArgs through swiss fails
+  // to render. Two variants set one from before this rule; a change may keep
+  // theirs as it is or drop it, and adds or changes none.
+  for (const [rel, s] of status) {
+    if (s === "D" || !/^models\/[^/]+\/[^/]+\.yaml$/.test(rel)) continue;
+    const now = doc(path.join(root, rel));
+    if (now?.kind !== "Variant" || now.values?.commandOverride == null) continue;
+    const was = s === "A" ? undefined : parseAt(rel)?.values?.commandOverride;
+    if (JSON.stringify(was ?? null) === JSON.stringify(now.values.commandOverride)) continue;
+    fail(rel, [
+      `values.commandOverride ${was == null ? "added" : "changed"}: it replaces the command line the chart builds, and swiss's extraArgs cannot reach it; put the engine's flags in extraArgs instead`,
+    ]);
   }
 
   for (const name of modelNames()) {

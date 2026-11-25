@@ -36,10 +36,32 @@
     }
   },
   "$defs": {
+    "engineChart": {
+      "description": "Which chart each engine runs on: sglang and vllm on the chart of their name, mock on one of those two, video on any chart but those two. validate-schema repeats it with readable messages; here it holds for anything that validates with the schema alone.",
+      "allOf": [
+        {
+          "if": { "required": ["engine"], "properties": { "engine": { "const": "sglang" } } },
+          "then": { "properties": { "chart": { "properties": { "name": { "const": "sglang" } } } } }
+        },
+        {
+          "if": { "required": ["engine"], "properties": { "engine": { "const": "vllm" } } },
+          "then": { "properties": { "chart": { "properties": { "name": { "const": "vllm" } } } } }
+        },
+        {
+          "if": { "required": ["engine"], "properties": { "engine": { "const": "mock" } } },
+          "then": { "properties": { "chart": { "properties": { "name": { "enum": ["sglang", "vllm"] } } } } }
+        },
+        {
+          "if": { "required": ["engine"], "properties": { "engine": { "const": "video" } } },
+          "then": { "properties": { "chart": { "properties": { "name": { "not": { "enum": ["sglang", "vllm"] } } } } } }
+        }
+      ]
+    },
     "variant": {
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "engine", "chart", "requires"],
+      "allOf": [{ "$ref": "#/$defs/engineChart" }],
       "properties": {
         "id": {
           "description": "Unique within this entry. Convention: <engine>-<parallelism>-<hardware>, e.g. sglang-tp8-b300.",
@@ -61,8 +83,8 @@
           "type": "boolean"
         },
         "engine": {
-          "description": "The server the variant runs. mock is a stand-in server for tests, such as mock-llmd: it has no chart of its own and runs on the sglang or vllm chart through commandOverride. Every other engine's chart is its own.",
-          "enum": ["sglang", "vllm", "mock"]
+          "description": "The server the variant runs. mock is a stand-in server for tests, such as mock-llmd: it has no chart of its own and runs on the sglang or vllm chart through commandOverride. video is a video generation service on a chart of its own, such as minimax-h3: any chart but sglang or vllm, and requires describes one pod of it (single-node, no nodes), because the chart lays out its own pods. sglang and vllm each run on the chart of their name.",
+          "enum": ["sglang", "vllm", "mock", "video"]
         },
         "chart": {
           "description": "Chart name and version only. Never a repository -- the site profile maps the name to its own registry, because this file cannot know it.",
@@ -71,7 +93,9 @@
           "required": ["name", "version"],
           "properties": {
             "name": {
-              "enum": ["sglang", "vllm"]
+              "description": "The chart: the engine's own for sglang and vllm, one of those two for mock, a video chart for video.",
+              "type": "string",
+              "pattern": "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$"
             },
             "version": {
               "description": "One chart version, or a range of them in helm's constraint syntax. A bare version pins exactly: 0.8.0 is 0.8.0 and nothing else. A range lets a chart fix reach this model version without publishing a new one: >=0.8.0, ^0.8.0 (0.8.x from 0.8.0), >=0.8.0 <0.9.0. A deploy records the one version the range resolved to, so the deploy itself stays pinned. Prereleases match only a range that names one.",
@@ -167,6 +191,57 @@
               }
             }
           ]
+        },
+        "inputs": {
+          "description": "Chart values every deploy must answer, such as the address of a service the site runs. Unlike requires, which swiss interprets and checks against the cluster, an input names one chart value by its key, and swiss only relays its answer: swiss puts the answer in the derived layer -- the site profile's inputs, else the input's default -- and the deploy's overrides go over it. swiss refuses to compose a plan that leaves one without a valid answer. A value values gives an input's key is the base its answer overrides. model.localPath is never one: swiss answers it from the site's model.pathTemplate.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "title", "example"],
+            "properties": {
+              "key": {
+                "description": "The chart value's key, a kustomize kyaml-style path of segments joined by \".\": a field (storageKVOffload.mooncake.master), [field=value] for the list item whose field equals value (volumes.[name=draft-model].hostPath.path), [=value] for the scalar list item equal to value, [^=prefix] for the scalar list item starting with prefix, or a bare number N for a list index (the key \"N\" on a map). - and * are not implemented. A key of fields only may be absent from values; any other must select exactly one string, number or boolean there. Unique within the variant.",
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_-]*(\\.([A-Za-z_][A-Za-z0-9_-]*|0|[1-9][0-9]*|\\[[A-Za-z_][A-Za-z0-9_-]*=[^\\]]*\\]|\\[=[^\\]]*\\]|\\[\\^=[^\\]]+\\]))*$",
+                "not": { "enum": ["model.localPath"] }
+              },
+              "patcher": {
+                "description": "For a string input, how the answer goes into the selected value: a template with {value} exactly once, such as \"--speculative-draft-model-path={value}\". Without it the answer replaces the whole value. No escaping: any other text, braces included, is literal. A value values gives the key must fit it.",
+                "type": "string",
+                "pattern": "\\{value\\}"
+              },
+              "title": {
+                "description": "What the deploy form labels the field with.",
+                "type": "string",
+                "minLength": 1
+              },
+              "description": {
+                "description": "What the value is, for the deploy form.",
+                "type": "string",
+                "minLength": 1
+              },
+              "type": {
+                "description": "What an answer is.",
+                "enum": ["string", "integer", "boolean"],
+                "default": "string"
+              },
+              "pattern": {
+                "description": "A regular expression a string answer matches, whole. Keep to the syntax Go and JavaScript read alike: swiss checks it, and so does the deploy form.",
+                "type": "string",
+                "minLength": 1
+              },
+              "example": {
+                "description": "A value of the right shape, never a real one: the deploy form's placeholder, and what CI renders the chart with when there is no default. Never deployed. Must be of the input's type and match its pattern.",
+                "type": ["string", "integer", "boolean"]
+              },
+              "default": {
+                "description": "The answer when the site profile gives none, such as the value of the cluster the variant was tuned on. Must be of the input's type and match its pattern.",
+                "type": ["string", "integer", "boolean"]
+              }
+            }
+          }
         },
         "values": {
           "description": "Chart values this variant sets. Any object",
