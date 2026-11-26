@@ -14,9 +14,12 @@ image:
   repository: quay.io/ascend/vllm-ascend
   tag: pinned@sha256:7859b75177884252d2b703eff727831ccab4e33a8bde0a9b4ac7563facc98b33
 requires:
-  gpus: 0
+  gpus: 8
   nodes: 2
   topology: lws
+  vendor: ascend
+  gpuProduct:
+    - Ascend-910B4
 values:
   env:
     - name: POD_IP
