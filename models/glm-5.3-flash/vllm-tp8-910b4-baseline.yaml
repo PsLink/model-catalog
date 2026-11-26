@@ -188,7 +188,7 @@ values:
     # The cookbook sets 1. A configuration derived from the 950DT variant pinned it to 0, and that
     # single difference is worth +30.8% at concurrency 16 -- see the measured block at the top.
     - name: VLLM_USE_V2_MODEL_RUNNER
-      value: "1"
+      value: "0"
     - name: PYTORCH_NPU_ALLOC_CONF
       value: expandable_segments:True
     - name: HCCL_BUFFSIZE
